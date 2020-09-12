@@ -12,6 +12,7 @@
   "author": "Roger P. Gee",
   "license": "MIT",
   "dependencies": {
+    "minimatch": "^3.0.4",
     "rollup": "^2.26.11"
   }
 }

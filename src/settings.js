@@ -102,11 +102,31 @@ function check_optional(fn,context,settings,name,defval,...types) {
     return fn(context,settings,name,...types);
 }
 
-class TargetSettings {
+class LoaderSettings {
     constructor(settings,context) {
         this.context = context;
 
-        this.include = check_optional(check_array,this.context,settings,"include",[],"string");
+        this.include = check_array(this.context,settings,"include","string");
+        this.exclude = check_optional(check_array,this.context,settings,"exclude",[],"string");
+
+        this.extensions = check_optional(
+            check_array,
+            context,
+            settings,
+            "extensions",
+            [".js","css"],
+            "string"
+        );
+
+        this._normalizeExtensions();
+    }
+
+    _normalizeExtensions() {
+        for (let i = 0;i < this.extensions.length;++i) {
+            if (this.extensions[i][0] != ".") {
+                this.extensions[i] = "." + this.extensions[i];
+            }
+        }
     }
 }
 
@@ -122,9 +142,9 @@ class BundleSettings {
 
 class PluginSettings {
     constructor(settings) {
-        this.targets = new TargetSettings(
-            check("settings",settings,"targets","object"),
-            "settings.targets"
+        this.loader = new LoaderSettings(
+            check("settings",settings,"loader","object"),
+            "settings.loader"
         );
 
         this.bundles = check_array_ensure("settings",settings,"bundles?","object")
@@ -134,6 +154,8 @@ class PluginSettings {
                     format_context("settings.bundles",index)
                 );
             });
+
+        this.write = check_optional(check,"settings",settings,"write",{},"object");
     }
 }
 
