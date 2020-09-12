@@ -2,8 +2,10 @@
  * kernel.js
  */
 
+const path = require("path");
 const rollup = require("rollup");
 
+const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
 const { Loader } = require("./loader");
 
@@ -32,12 +34,33 @@ class Kernel {
     }
 
     async compileBundle(bundleSettings) {
+        // Figure out the path where the bundle(s) will be written. This is
+        // slightly non-intuiative since rollup doesn't give us the full path in
+        // the generated chunk info. So we'll pull it from the options
+        // ourselves.
+        let outputDir;
+        if (bundleSettings.output.dir) {
+            outputDir = bundleSettings.output.dir;
+        }
+        else if (bundleSettings.output.file) {
+            outputDir = path.dirname(bundleSettings.output.file);
+        }
+        else {
+            throw new PluginError(
+                "failed to determine output path for '%s': 'file' or 'dir' is required",
+                bundleSettings.context
+            );
+        }
+
         this.loader.begin();
         const results = await this.buildBundle(bundleSettings);
         const parentTargets = this.loader.end();
 
         return results.map((chunk) => {
-            const target = this.context.resolveTargets(chunk.fileName,parentTargets);
+            const target = this.context.resolveTargets(
+                path.join(outputDir,chunk.fileName),
+                parentTargets
+            );
             target.stream.end(chunk.code);
 
             return target;
