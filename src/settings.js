@@ -155,6 +155,8 @@ class PluginSettings {
                 );
             });
 
+        this.build = check_optional(check_array,"settings",settings,"build",[],"object","string");
+
         this.write = check_optional(check,"settings",settings,"write",{},"object");
     }
 }

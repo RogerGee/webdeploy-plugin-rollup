@@ -2,23 +2,39 @@
  * kernel.js
  */
 
+const fs = require("fs");
 const path = require("path");
 const rollup = require("rollup");
+const { format } = require("util");
 
 const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
 const { Loader } = require("./loader");
 
+const OUTPUT_CACHE_KEY = "rollup.output";
+
 class Kernel {
     constructor(context,settings) {
         this.context = context;
-        this.settings = new PluginSettings(settings);
+        if (settings.__audited) {
+            this.settings = settings.__audited;
+        }
+        else {
+            this.settings = new PluginSettings(settings);
+        }
         this.loader = new Loader(this.settings.loader);
     }
 
     async exec() {
         await this.loader.addTargets(this.context);
+        if (this.loader.count() == 0) {
+            return this.finalize();
+        }
 
+        this.context.logger.log("Generating bundles:");
+        this.context.logger.pushIndent();
+
+        // Compile bundles
         const targets = [];
         for (let i = 0;i < this.settings.bundles.length;++i) {
             const newTargets = await this.compileBundle(this.settings.bundles[i]);
@@ -27,10 +43,11 @@ class Kernel {
             }
         }
 
+        this.context.logger.popIndent();
 
-        // Chain to write plugin.
-
-        return this.context.chain("write",this.settings.write);
+        await this.executeBuilder(targets);
+        await this.processOutput(targets);
+        await this.finalize();
     }
 
     async compileBundle(bundleSettings) {
@@ -57,6 +74,11 @@ class Kernel {
         const parentTargets = this.loader.end();
 
         return results.map((chunk) => {
+            const nmodules = Object.keys(chunk.modules).length;
+            this.context.logger.log(
+                format("_%s_ with %d modules",chunk.fileName,nmodules)
+            );
+
             const target = this.context.resolveTargets(
                 path.join(outputDir,chunk.fileName),
                 parentTargets
@@ -80,7 +102,70 @@ class Kernel {
         const outputOptions = Object.assign({},bundleSettings.output);
 
         const results = await bundle.generate(outputOptions);
+
         return results.output;
+    }
+
+    async executeBuilder(targets) {
+        if (this.settings.build.length == 0) {
+            return;
+        }
+
+        this.context.logger.log("Building bundles:");
+        this.context.logger.pushIndent();
+
+        targets.forEach((target) => {
+            this.context.buildTarget(target,this.settings.build);
+        });
+
+        const result = await this.context.executeBuilder();
+        this.context.logger.popIndent();
+
+        return result;
+    }
+
+    async processOutput(targets) {
+        const output = targets.map((target) => target.getSourceTargetPath());
+        const fileset = new Set();
+
+        for (let i = 0;i < output.length;++i) {
+            const resolv = this.context.graph.resolveConnection(output[i]);
+            if (resolv != output[i]) {
+                output.splice(i,1,resolv);
+            }
+
+            fileset.add(output[i]);
+        }
+
+        // Look up output from a previous run in cache. Use the previous file
+        // list to remove output files that are no longer a part of the
+        // deployment.
+
+        const prevOutput = await this.context.readCacheProperty(OUTPUT_CACHE_KEY) || [];
+        const deleteList = prevOutput.filter((x) => !fileset.has(x));
+
+        for (let i = 0;i < deleteList.length;++i) {
+            const filepath = this.context.makeDeployPath(deleteList[i]);
+            const err = await new Promise((resolve) => {
+                fs.unlink(filepath,resolve);
+            });
+
+            this.context.logger.log("Unlinked _" + filepath + "_");
+
+            if (err) {
+                if (err.code != "ENOENT") {
+                    throw err;
+                }
+            }
+        }
+
+        // Save output files in deployment cache.
+
+        await this.context.writeCacheProperty(OUTPUT_CACHE_KEY,output);
+    }
+
+    async finalize() {
+        return this.context.chain("write",this.settings.write);
     }
 }
 

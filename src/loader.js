@@ -54,6 +54,10 @@ class Loader {
         }
     }
 
+    count() {
+        return this.moduleMap.size;
+    }
+
     begin(resolver) {
         this.resolver = resolver;
         this.currentLoadSet.clear();
