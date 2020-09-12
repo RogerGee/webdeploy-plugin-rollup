@@ -1,0 +1,17 @@
+{
+  "name": "@webdeploy/plugin-rollup",
+  "version": "1.0.0-dev",
+  "description": "Webdeploy rollup deploy plugin",
+  "main": "plugin.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "webdeploy"
+  ],
+  "author": "Roger P. Gee",
+  "license": "MIT",
+  "dependencies": {
+    "rollup": "^2.26.11"
+  }
+}
