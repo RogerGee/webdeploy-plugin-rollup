@@ -2,14 +2,16 @@
  * settings.js
  */
 
+const { format } = require("util");
+
 const { PluginError } = require("./error");
 
 function format_context(context,key) {
     if (typeof key === "number") {
-        return context + "[" + key + "]";
+        return format("%s[%d]",context,key);
     }
 
-    return context + "." + key;
+    return format("%s.%s",context,key);
 }
 
 function check_val(context,key,val,...types) {
@@ -102,12 +104,39 @@ function check_optional(fn,context,settings,name,defval,...types) {
     return fn(context,settings,name,...types);
 }
 
+class NodeModulesSettings {
+    constructor(settings,context) {
+        this.context = context;
+
+        this.options = check_optional(check,this.context,settings,"options",{},"object");
+    }
+}
+
 class LoaderSettings {
     constructor(settings,context) {
         this.context = context;
 
         this.include = check_array(this.context,settings,"include","string");
         this.exclude = check_optional(check_array,this.context,settings,"exclude",[],"string");
+
+        const nodeModules = check_optional(
+            check,
+            context,
+            settings,
+            "nodeModules",
+            false,
+            "object",
+            "boolean"
+        );
+        if (nodeModules) {
+            this.nodeModules = new NodeModulesSettings(
+                typeof nodeModules === "object" ? nodeModules : {},
+                format("%s.nodeModules",this.context)
+            );
+        }
+        else {
+            this.nodeModules = null;
+        }
 
         this.extensions = check_optional(
             check_array,

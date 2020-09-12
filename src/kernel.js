@@ -22,7 +22,7 @@ class Kernel {
         else {
             this.settings = new PluginSettings(settings);
         }
-        this.loader = new Loader(this.settings.loader);
+        this.loader = new Loader(this.settings.loader,context);
     }
 
     async exec() {
@@ -90,16 +90,13 @@ class Kernel {
     }
 
     async buildBundle(bundleSettings) {
-        const loaderPlugin = this.loader.plugin();
-        const inputPlugins = [];
-        inputPlugins.push(loaderPlugin); // last
-
         const inputOptions = Object.assign({},bundleSettings.input);
-        inputOptions.plugins = inputPlugins;
+        inputOptions.plugins = this.loader.getInputPlugins(inputOptions.plugins);
 
         const bundle = await rollup.rollup(inputOptions);
 
         const outputOptions = Object.assign({},bundleSettings.output);
+        outputOptions.plugins = this.loader.getOutputPlugins(outputOptions.plugins);
 
         const results = await bundle.generate(outputOptions);
 

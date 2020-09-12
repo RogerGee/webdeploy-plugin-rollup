@@ -2,6 +2,7 @@
  * loader.js
  */
 
+const path = require("path");
 const minimatch = require("minimatch");
 const { format } = require("util");
 
@@ -21,9 +22,26 @@ function makePlugin(loader,options) {
     };
 }
 
+function makeDummyPlugin(options) {
+    return {
+        name: "webdeploy-rollup-dummy",
+
+        load(id) {
+            // TODO Prevent rollup from hitting the filesystem.
+            return null;
+        },
+
+        resolveId(source) {
+            // TODO Prevent rollup from hitting the filesystem.
+            return null;
+        }
+    };
+}
+
 class Loader {
-    constructor(settings) {
+    constructor(settings,context) {
         this.settings = settings;
+        this.context = context;
         this.moduleMap = new Map();
         this.loadSet = new Set();
         this.currentLoadSet = new Set();
@@ -32,6 +50,30 @@ class Loader {
 
     plugin(options) {
         return makePlugin(this,options || {});
+    }
+
+    getInputPlugins(extra) {
+        let plugins = [this.plugin()];
+        if (extra) {
+            plugins = plugins.concat(extra);
+        }
+
+        if (this.settings.nodeModules) {
+            plugins.push(this.makeNodeModulesPlugin());
+        }
+
+        plugins.push(makeDummyPlugin({})); // last
+
+        return plugins;
+    }
+
+    getOutputPlugins(extra) {
+        let plugins = [];
+        if (extra) {
+            plugins = plugins.concat(extra);
+        }
+
+        return plugins;
     }
 
     async addTargets(context) {
@@ -71,8 +113,7 @@ class Loader {
     load(id) {
         const target = this.loadTarget(id);
         if (!target) {
-            // Throw to prevent rollup from hitting the file system.
-            throw new PluginError("cannot import '%s': no such module",id);
+            return null;
         }
 
         // Remember that this target was loaded for later.
@@ -89,6 +130,8 @@ class Loader {
         if (target) {
             return id;
         }
+
+        return null;
     }
 
     loadTarget(id) {
@@ -122,6 +165,20 @@ class Loader {
         }
 
         return id;
+    }
+
+    makeNodeModulesPlugin() {
+        const plugin = require("@rollup/plugin-node-resolve").default;
+        const opts = Object.assign({},this.settings.nodeModules.options);
+
+        // Assign custom resolve options. We do not allow the user to manipulate
+        // these.
+        opts.customResolveOptions = {
+            basedir: this.context.tree.getPath(),
+            moduleDirectory: path.join(this.context.tree.getRelativePath(),"node_modules")
+        };
+
+        return plugin(opts);
     }
 }
 
