@@ -38,10 +38,13 @@ class Kernel {
 
         // Compile bundles
         const targets = [];
+        const entryPoints = [];
         for (let i = 0;i < this.settings.bundles.length;++i) {
-            const newTargets = await this.compileBundle(this.settings.bundles[i]);
-            for (let j = 0;j < newTargets.length;++j) {
-                targets.push(newTargets[j]);
+            const nextResults = await this.compileBundle(this.settings.bundles[i]);
+            for (let j = 0;j < nextResults.length;++j) {
+                const next = nextResults[j];
+                targets.push(next.target);
+                entryPoints.push(next.entryTarget.getSourceTargetPath());
             }
         }
 
@@ -52,8 +55,8 @@ class Kernel {
         // tree.
         this.context.removeTargets(this.loader.calcExtraneous(),true);
 
-        await this.executeBuilder(targets);
-        await this.processOutput(targets);
+        const output = await this.executeBuilder(targets);
+        await this.processOutput(output,entryPoints);
         await this.finalize();
     }
 
@@ -78,7 +81,7 @@ class Kernel {
 
         this.loader.begin();
         const results = await this.buildBundle(bundleSettings);
-        const parentTargets = this.loader.end();
+        const { entryTarget, parentTargets } = this.loader.end();
 
         return results.map((chunk) => {
             const nmodules = Object.keys(chunk.modules).length;
@@ -92,7 +95,7 @@ class Kernel {
             );
             target.stream.end(chunk.code);
 
-            return target;
+            return { target, entryTarget };
         });
     }
 
@@ -121,41 +124,56 @@ class Kernel {
 
     async executeBuilder(targets) {
         if (this.settings.build.length == 0) {
-            return;
+            return targets.map((target) => target.getSourceTargetPath());
         }
+
+        const output = [];
 
         this.context.logger.log("Building bundles:");
         this.context.logger.pushIndent();
 
         targets.forEach((target) => {
+            output.push(target.getSourceTargetPath());
             this.context.buildTarget(target,this.settings.build);
         });
 
-        const result = await this.context.executeBuilder();
+        await this.context.executeBuilder();
         this.context.logger.popIndent();
 
-        return result;
-    }
-
-    async processOutput(targets) {
-        const output = targets.map((target) => target.getSourceTargetPath());
-        const fileset = new Set();
+        // Resolve connections from old target names in case any names changed
+        // during the build.
 
         for (let i = 0;i < output.length;++i) {
             const resolv = this.context.graph.resolveConnection(output[i]);
             if (resolv != output[i]) {
                 output.splice(i,1,resolv);
             }
-
-            fileset.add(output[i]);
         }
 
-        // Look up output from a previous run in cache. Use the previous file
-        // list to remove output files that are no longer a part of the
-        // deployment.
+        return output;
+    }
+
+    async processOutput(output,entryPoints) {
+        // Look up output from a previous run in cache. If a previous output
+        // file was built using one of the entry point of a current output file
+        // and the names are different, then we delete the old file.
 
         const prevOutput = await this.context.readCacheProperty(OUTPUT_CACHE_KEY) || [];
-        const deleteList = prevOutput.filter((x) => !fileset.has(x));
+        const deleteList = prevOutput.filter((file) => {
+            const nodes = this.context.prevGraph.lookupReverse(file);
+
+            let i = 0;
+            while (i < nodes.length) {
+                const index = entryPoints.indexOf(nodes[i]);
+                if (index >= 0) {
+                    return output.indexOf(file) < 0;
+                }
+
+                i += 1;
+            }
+
+            return false;
+        });
 
         for (let i = 0;i < deleteList.length;++i) {
             const filepath = this.context.makeDeployPath(deleteList[i]);

@@ -67,6 +67,7 @@ class Loader {
         this.moduleMap = new Map();
         this.loadSet = new Set();
         this.currentLoadSet = new Set();
+        this.entryTarget = null;
         this.resolver = null;
     }
 
@@ -123,11 +124,15 @@ class Loader {
     begin(resolver) {
         this.resolver = resolver;
         this.currentLoadSet.clear();
+        this.entryTarget = null;
     }
 
     end() {
         this.resolver = null;
-        return Array.from(this.currentLoadSet);
+        return {
+            parentTargets: Array.from(this.currentLoadSet),
+            entryTarget: this.entryTarget
+        };
     }
 
     calcExtraneous() {
@@ -149,6 +154,11 @@ class Loader {
         // Remember that this target was loaded for later.
         this.currentLoadSet.add(target);
         this.loadSet.add(target);
+
+        // Consider first loaded target the entry target.
+        if (!this.entryTarget) {
+            this.entryTarget = target;
+        }
 
         return target.getContent();
     }
