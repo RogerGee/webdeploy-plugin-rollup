@@ -14,6 +14,10 @@ const { PluginError } = require("./error");
 
 const PREFIX = "\0webdeploy:";
 
+class LoaderAbortException extends Error {
+
+}
+
 function makePlugin(loader,options) {
     return {
         name: 'webdeploy-rollup-loader',
@@ -34,7 +38,11 @@ function makePlugin(loader,options) {
                 return PREFIX + resolv;
             }
 
-            if (importer && importer.startsWith(PREFIX)) {
+            if (!importer) {
+                throw new LoaderAbortException();
+            }
+
+            if (importer.startsWith(PREFIX)) {
                 const context = "/" + importer.slice(PREFIX.length);
                 const resolved = xpath.resolve(
                     xpath.dirname(context),
@@ -208,5 +216,6 @@ class Loader {
 }
 
 module.exports = {
-    Loader
+    Loader,
+    LoaderAbortException
 };

@@ -1,5 +1,7 @@
 /**
  * kernel.js
+ *
+ * rollup (webdeploy plugin)
  */
 
 const fs = require("fs");
@@ -9,7 +11,7 @@ const { format } = require("util");
 
 const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
-const { Loader } = require("./loader");
+const { Loader, LoaderAbortException } = require("./loader");
 
 const OUTPUT_CACHE_KEY = "rollup.output";
 
@@ -98,7 +100,16 @@ class Kernel {
         const inputOptions = Object.assign({},bundleSettings.input);
         inputOptions.plugins = this.loader.getInputPlugins(inputOptions.plugins);
 
-        const bundle = await rollup.rollup(inputOptions);
+        let bundle;
+        try {
+            bundle = await rollup.rollup(inputOptions);
+        } catch (ex) {
+            if (ex instanceof LoaderAbortException) {
+                return [];
+            }
+
+            throw ex;
+        }
 
         const outputOptions = Object.assign({},bundleSettings.output);
         outputOptions.plugins = this.loader.getOutputPlugins(outputOptions.plugins);
