@@ -45,6 +45,11 @@ class Kernel {
 
         this.context.logger.popIndent();
 
+        // Remove unused targets from the context. Since these targets were
+        // selected by the configuration, we must purge them from the dependency
+        // tree.
+        this.context.removeTargets(this.loader.calcExtraneous(),true);
+
         await this.executeBuilder(targets);
         await this.processOutput(targets);
         await this.finalize();
