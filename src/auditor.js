@@ -1,5 +1,7 @@
 /**
  * auditor.js
+ *
+ * rollup (webdeploy plugin)
  */
 
 const { PluginSettings } = require("./settings");

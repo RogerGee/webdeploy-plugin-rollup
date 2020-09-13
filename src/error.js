@@ -1,5 +1,7 @@
 /**
  * error.js
+ *
+ * rollup (webdeploy plugin)
  */
 
 const { format } = require("util");

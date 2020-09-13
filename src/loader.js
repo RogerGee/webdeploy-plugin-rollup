@@ -1,38 +1,52 @@
 /**
  * loader.js
+ *
+ * rollup (webdeploy plugin)
  */
 
 const path = require("path");
+const xpath = path.posix;
 const minimatch = require("minimatch");
 const { format } = require("util");
 
+const utils = require("./utils");
 const { PluginError } = require("./error");
+
+const PREFIX = "\0webdeploy:";
 
 function makePlugin(loader,options) {
     return {
         name: 'webdeploy-rollup-loader',
 
         load(id) {
-            return loader.load(id);
-        },
+            if (id.startsWith(PREFIX)) {
+                const moduleId = id.slice(PREFIX.length);
 
-        resolveId(source) {
-            return loader.resolveId(source);
-        }
-    };
-}
+                return loader.load(moduleId);
+            }
 
-function makeDummyPlugin(options) {
-    return {
-        name: "webdeploy-rollup-dummy",
-
-        load(id) {
-            // TODO Prevent rollup from hitting the filesystem.
             return null;
         },
 
-        resolveId(source) {
-            // TODO Prevent rollup from hitting the filesystem.
+        resolveId(source,importer) {
+            const resolv = loader.resolveId(source);
+            if (resolv) {
+                return PREFIX + resolv;
+            }
+
+            if (importer && importer.startsWith(PREFIX)) {
+                const context = "/" + importer.slice(PREFIX.length);
+                const resolved = xpath.resolve(
+                    xpath.dirname(context),
+                    source
+                ).slice(1);
+
+                const resolv = loader.resolveId(resolved);
+                if (resolv) {
+                    return PREFIX + resolv;
+                }
+            }
+
             return null;
         }
     };
@@ -53,7 +67,7 @@ class Loader {
     }
 
     getInputPlugins(extra) {
-        let plugins = [this.plugin()];
+        let plugins = [this.plugin()]; // first
         if (extra) {
             plugins = plugins.concat(extra);
         }
@@ -61,8 +75,6 @@ class Loader {
         if (this.settings.nodeModules) {
             plugins.push(this.makeNodeModulesPlugin());
         }
-
-        plugins.push(makeDummyPlugin({})); // last
 
         return plugins;
     }
@@ -108,6 +120,16 @@ class Loader {
     end() {
         this.resolver = null;
         return Array.from(this.currentLoadSet);
+    }
+
+    calcExtraneous() {
+        const targets = new Set(Array.from(this.moduleMap.values()));
+
+        this.loadSet.forEach((target) => {
+            targets.delete(target);
+        });
+
+        return Array.from(targets);
     }
 
     load(id) {
@@ -158,6 +180,9 @@ class Loader {
 
     resolveSourceToId(source) {
         let id = source;
+
+        // Remove leading path separators.
+        id = utils.strip(id,xpath.sep);
 
         // Use the resolver to inject any custom resolution.
         if (this.resolver) {
