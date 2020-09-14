@@ -214,11 +214,17 @@ class Loader {
         const plugin = require("@rollup/plugin-node-resolve").default;
         const opts = Object.assign({},this.settings.nodeModules.options);
 
+        if (!this.context.nodeModules) {
+            throw new PluginError(
+                "Cannot create plugin-node-resolve: node_modules are not available for this project tree"
+            );
+        }
+
         // Assign custom resolve options. We do not allow the user to manipulate
         // these.
         opts.customResolveOptions = {
             basedir: this.context.tree.getPath(),
-            moduleDirectory: path.join(this.context.tree.getRelativePath(),"node_modules")
+            moduleDirectory: this.context.nodeModules
         };
 
         return plugin(opts);
