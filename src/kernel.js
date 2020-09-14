@@ -164,21 +164,34 @@ class Kernel {
         // and the names are different, then we delete the old file.
 
         const prevOutput = await this.context.readCacheProperty(OUTPUT_CACHE_KEY) || [];
-        const deleteList = prevOutput.filter((file) => {
+
+        const keep = [];
+        const deleteList = [];
+
+        for (let i = 0; i < prevOutput.length;++i) {
+            const file = prevOutput[i];
             const nodes = this.context.prevGraph.lookupReverse(file);
 
-            let i = 0;
-            while (i < nodes.length) {
-                const index = entryPoints.indexOf(nodes[i]);
+            let j = 0;
+            while (j < nodes.length) {
+                const index = entryPoints.indexOf(nodes[j]);
                 if (index >= 0) {
-                    return output.indexOf(file) < 0;
+                    if (output.indexOf(file) < 0) {
+                        deleteList.push(file);
+                    }
+
+                    break;
                 }
 
-                i += 1;
+                j += 1;
             }
 
-            return false;
-        });
+            if (j >= nodes.length) {
+                keep.push(file);
+            }
+        }
+
+        // Delete old output files that are no longer needed.
 
         for (let i = 0;i < deleteList.length;++i) {
             const filepath = this.context.makeDeployPath(deleteList[i]);
@@ -197,7 +210,9 @@ class Kernel {
 
         // Save output files in deployment cache.
 
-        await this.context.writeCacheProperty(OUTPUT_CACHE_KEY,output);
+        const augmented = output.concat(keep);
+
+        await this.context.writeCacheProperty(OUTPUT_CACHE_KEY,augmented);
     }
 
     async finalize() {
