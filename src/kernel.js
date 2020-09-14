@@ -103,6 +103,11 @@ class Kernel {
         const inputOptions = Object.assign({},bundleSettings.input);
         inputOptions.plugins = this.loader.getInputPlugins(inputOptions.plugins);
 
+        // Apply babel settings to input options.
+        if (bundleSettings.babel) {
+            inputOptions.plugins.push(this.loader.makeBabelPlugin(bundleSettings.babel));
+        }
+
         let bundle;
         try {
             bundle = await rollup.rollup(inputOptions);

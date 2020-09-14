@@ -12,6 +12,7 @@
   "author": "Roger P. Gee",
   "license": "MIT",
   "dependencies": {
+    "@rollup/plugin-babel": "^5.2.1",
     "@rollup/plugin-node-resolve": "^9.0.0",
     "minimatch": "^3.0.4",
     "rollup": "^2.26.11"

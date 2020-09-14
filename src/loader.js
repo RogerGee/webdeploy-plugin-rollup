@@ -12,7 +12,11 @@ const { format } = require("util");
 const utils = require("./utils");
 const { PluginError } = require("./error");
 
-const PREFIX = "\0webdeploy:";
+// NOTE: I'd like the prefix to contain a null byte, but many rollup packages
+// refuse to touch a file if its name has a null byte. So intead, we ensure the
+// file name has the path delimiter - an invalid character - so that it can't be
+// mistaken for an external file.
+const PREFIX = "webdeploy" + path.delimiter;
 
 class LoaderAbortException extends Error {
 
@@ -146,7 +150,7 @@ class Loader {
     }
 
     load(id) {
-        const target = this.loadTarget(id);
+        const target = this.moduleMap.get(id);
         if (!target) {
             return null;
         }
@@ -164,39 +168,6 @@ class Loader {
     }
 
     resolveId(source) {
-        const id = this.resolveSourceToId(source);
-        const target = this.loadTarget(id);
-
-        if (target) {
-            return id;
-        }
-
-        return null;
-    }
-
-    loadTarget(id) {
-        // Try the import as-is.
-        const target = this.moduleMap.get(id);
-        if (target) {
-            return target;
-        }
-
-        // Try the import with one of the configured extensions.
-        let i = 0;
-        while (i < this.settings.extensions.length) {
-            const cand = id + this.settings.extensions[i];
-            const target = this.moduleMap.get(cand);
-            if (target) {
-                return target;
-            }
-
-            i += 1;
-        }
-
-        return null;
-    }
-
-    resolveSourceToId(source) {
         let id = source;
 
         // Remove leading path separators.
@@ -207,7 +178,18 @@ class Loader {
             id = this.resolver.resolve(id);
         }
 
-        return id;
+        // Try the import with one of the configured extensions.
+        let i = 0;
+        while (i < this.settings.extensions.length) {
+            const cand = id + this.settings.extensions[i];
+            if (this.moduleMap.has(cand)) {
+                return cand;
+            }
+
+            i += 1;
+        }
+
+        return null;
     }
 
     makeNodeModulesPlugin() {
@@ -226,6 +208,26 @@ class Loader {
             basedir: this.context.tree.getPath(),
             moduleDirectory: this.context.nodeModules
         };
+
+        return plugin(opts);
+    }
+
+    makeBabelPlugin(options) {
+        const plugin = require("@rollup/plugin-babel").default;
+        const opts = Object.assign({},options);
+
+        if (!this.context.nodeModules) {
+            throw new PluginError(
+                "Cannot create plugin-babel: node_modules are not available for this project tree"
+            );
+        }
+
+        // Make babel work under the webdeploy project tree node_modules.
+        opts.cwd = this.context.nodeModules;
+
+        if (!opts.include) {
+            opts.include = new RegExp("^" + PREFIX);
+        }
 
         return plugin(opts);
     }

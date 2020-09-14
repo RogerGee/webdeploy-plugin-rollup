@@ -168,6 +168,7 @@ class BundleSettings {
         this.output = check(this.context,settings,"output","object");
         this.input = check(this.context,settings,"input","object");
         this.resolve = check_optional(check,this.context,settings,"resolve",{},"object");
+        this.babel = check_optional(check,context,settings,"babel",null,"object");
     }
 }
 
