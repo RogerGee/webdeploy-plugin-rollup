@@ -116,16 +116,31 @@ class Loader {
 
         let plugins = [this.plugin()]; // first
 
-        if (options.plugins) {
-            plugins = plugins.concat(options.plugins);
-        }
-
         if (this.settings.nodeModules) {
             plugins.push(this.makeNodeModulesPlugin());
         }
 
         if (bundleSettings.babel) {
             plugins.push(this.makeBabelPlugin(bundleSettings.babel));
+        }
+
+        for (let i = 0;i < bundleSettings.plugins.length;++i) {
+            let packageName;
+            let options;
+            const spec = bundleSettings.plugins[i];
+
+            if (Array.isArray(spec)) {
+                packageName = spec[0];
+                options = spec[1] || {};
+            }
+            else {
+                packageName = spec;
+                options = {};
+            }
+
+            const plugin = require(packageName);
+
+            plugins.push(plugin(options));
         }
 
         options.plugins = plugins;
