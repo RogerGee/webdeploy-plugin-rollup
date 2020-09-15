@@ -13,10 +13,41 @@ const utils = require("./utils");
 const { PluginError } = require("./error");
 
 // NOTE: I'd like the prefix to contain a null byte, but many rollup packages
-// refuse to touch a file if its name has a null byte. So intead, we ensure the
-// file name has the path delimiter - an invalid character - so that it can't be
-// mistaken for an external file.
-const PREFIX = "webdeploy" + path.delimiter;
+// refuse to touch a file if its name has a null byte.
+const PREFIX = "webdeploy:";
+
+function modify_external(external) {
+    function make(id) {
+        if (id[0] == "/") {
+            return PREFIX + id.slice(1);
+        }
+
+        return id;
+    }
+
+    // NOTE: Currently we only support string or string[].
+
+    if (typeof external === "string") {
+        options.external = make(external);
+    }
+    else if (Array.isArray(external)) {
+        for (let i = 0;i < external.length;++i) {
+            if (typeof external[i] === "string") {
+                external[i] = make(external[i]);
+            }
+        }
+    }
+
+}
+
+function modify_globals(globals) {
+    Object.keys(globals).forEach((key) => {
+        if (key[0] == "/") {
+            globals[PREFIX + key.slice(1)] = globals[key];
+            delete globals[key];
+        }
+    });
+}
 
 class LoaderAbortException extends Error {
 
@@ -36,27 +67,28 @@ function makePlugin(loader,options) {
             return null;
         },
 
-        resolveId(source,importer) {
-            const resolv = loader.resolveId(source);
+        resolveId(source,_importer) {
+            let importer = _importer;
+
+            if (importer) {
+                if (importer.startsWith(PREFIX)) {
+                    importer = "/" + importer.slice(PREFIX.length);
+                }
+                else if (source[0] == ".") {
+                    // Cannot import webdeploy module from non-webdeploy module.
+                    return null;
+                }
+            }
+
+            const resolv = loader.resolveId(source,importer);
             if (resolv) {
                 return PREFIX + resolv;
             }
 
+            // If there was no importer, then we failed to resolve the main
+            // module and need to abort.
             if (!importer) {
                 throw new LoaderAbortException();
-            }
-
-            if (importer.startsWith(PREFIX)) {
-                const context = "/" + importer.slice(PREFIX.length);
-                const resolved = xpath.resolve(
-                    xpath.dirname(context),
-                    source
-                ).slice(1);
-
-                const resolv = loader.resolveId(resolved);
-                if (resolv) {
-                    return PREFIX + resolv;
-                }
             }
 
             return null;
@@ -79,26 +111,44 @@ class Loader {
         return makePlugin(this,options || {});
     }
 
-    getInputPlugins(extra) {
+    makeInputOptions(bundleSettings) {
+        const options = Object.assign({},bundleSettings.input);
+
+        // Manipulate plugins.
+
         let plugins = [this.plugin()]; // first
-        if (extra) {
-            plugins = plugins.concat(extra);
+
+        if (options.plugins) {
+            plugins = plugins.concat(options.plugins);
         }
 
         if (this.settings.nodeModules) {
             plugins.push(this.makeNodeModulesPlugin());
         }
 
-        return plugins;
-    }
-
-    getOutputPlugins(extra) {
-        let plugins = [];
-        if (extra) {
-            plugins = plugins.concat(extra);
+        if (bundleSettings.babel) {
+            plugins.push(this.makeBabelPlugin(bundleSettings.babel));
         }
 
-        return plugins;
+        options.plugins = plugins;
+
+        // Manipulate external.
+
+        if (options.external) {
+            modify_external(options.external);
+        }
+
+        return options;
+    }
+
+    makeOutputOptions(bundleSettings) {
+        const options = Object.assign({},bundleSettings.output);
+
+        if (options.globals) {
+            modify_globals(options.globals);
+        }
+
+        return options;
     }
 
     async addTargets(context) {
@@ -167,23 +217,41 @@ class Loader {
         return target.getContent();
     }
 
-    resolveId(source) {
+    resolveId(source,importer) {
         let id = source;
 
-        // Remove leading path separators.
-        id = utils.strip(id,xpath.sep);
+        // Unless configured, we do not allow imports without path
+        // characteristics to access webdeploy modules.
+        if (!this.settings.implicitRoot) {
+            if (id[0] != "." && id[0] != "/") {
+                return null;
+            }
+        }
+
+        // Resolve relative to importer or root.
+        if (importer) {
+            id = xpath.resolve(xpath.dirname(importer),id).slice(1);
+        }
+        else {
+            id = xpath.resolve("/",id).slice(1);
+        }
 
         // Use the resolver to inject any custom resolution.
         if (this.resolver) {
             id = this.resolver.resolve(id);
         }
 
-        // Try the import with one of the configured extensions.
+        if (this.moduleMap.has(id)) {
+            return id;
+        }
+
         let i = 0;
         while (i < this.settings.extensions.length) {
-            const cand = id + this.settings.extensions[i];
-            if (this.moduleMap.has(cand)) {
-                return cand;
+            const idWithExt = id + this.settings.extensions[i];
+
+            // Try the ID with the extension.
+            if (this.moduleMap.has(idWithExt)) {
+                return idWithExt;
             }
 
             i += 1;

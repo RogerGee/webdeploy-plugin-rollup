@@ -100,13 +100,7 @@ class Kernel {
     }
 
     async buildBundle(bundleSettings) {
-        const inputOptions = Object.assign({},bundleSettings.input);
-        inputOptions.plugins = this.loader.getInputPlugins(inputOptions.plugins);
-
-        // Apply babel settings to input options.
-        if (bundleSettings.babel) {
-            inputOptions.plugins.push(this.loader.makeBabelPlugin(bundleSettings.babel));
-        }
+        const inputOptions = this.loader.makeInputOptions(bundleSettings);
 
         let bundle;
         try {
@@ -119,9 +113,7 @@ class Kernel {
             throw ex;
         }
 
-        const outputOptions = Object.assign({},bundleSettings.output);
-        outputOptions.plugins = this.loader.getOutputPlugins(outputOptions.plugins);
-
+        const outputOptions = this.loader.makeOutputOptions(bundleSettings);
         const results = await bundle.generate(outputOptions);
 
         return results.output;
@@ -171,6 +163,10 @@ class Kernel {
         for (let i = 0; i < prevOutput.length;++i) {
             const file = prevOutput[i];
             const nodes = this.context.prevGraph.lookupReverse(file);
+
+            if (!nodes) {
+                continue;
+            }
 
             let j = 0;
             while (j < nodes.length) {

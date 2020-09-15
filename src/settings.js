@@ -118,6 +118,15 @@ class LoaderSettings {
     constructor(settings,context) {
         this.context = context;
 
+        this.implicitRoot = check_optional(
+            check,
+            this.context,
+            settings,
+            "implicitRoot",
+            false,
+            "boolean"
+        );
+
         this.include = check_array(this.context,settings,"include","string");
         this.exclude = check_optional(check_array,this.context,settings,"exclude",[],"string");
 
