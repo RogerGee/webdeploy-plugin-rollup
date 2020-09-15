@@ -81,9 +81,11 @@ class Kernel {
 
         this.loader.begin();
         const results = await this.buildBundle(bundleSettings);
-        const { entryTarget, parentTargets } = this.loader.end();
+        const { entryTarget, parentTargets, extra } = this.loader.end();
 
-        return results.map((chunk) => {
+        let output = extra.map((target) => ({ target, entryTarget }));
+
+        output = output.concat(results.map((chunk) => {
             const nmodules = Object.keys(chunk.modules).length;
             this.context.logger.log(
                 format("_%s_ with %d modules",chunk.fileName,nmodules)
@@ -96,7 +98,9 @@ class Kernel {
             target.stream.end(chunk.code);
 
             return { target, entryTarget };
-        });
+        }));
+
+        return output;
     }
 
     async buildBundle(bundleSettings) {
@@ -152,7 +156,7 @@ class Kernel {
 
     async processOutput(output,entryPoints) {
         // Look up output from a previous run in cache. If a previous output
-        // file was built using one of the entry point of a current output file
+        // file was built using one of the entry points of a current output file
         // and the names are different, then we delete the old file.
 
         const prevOutput = await this.context.readCacheProperty(OUTPUT_CACHE_KEY) || [];

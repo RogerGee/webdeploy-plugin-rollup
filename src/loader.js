@@ -36,42 +36,23 @@ const OUTPUT_HOOKS = {
 	writeBundle: 1
 };
 
+function strip_plugin(plugin,hooks) {
+    const stripped = { name: plugin.name };
+
+    // Strip out hooks that either don't work in this context or are unsupported
+    // by this webdeploy plugin.
+    Object.keys(plugin).forEach((hook) => {
+        if (hook in hooks) {
+            stripped[hook] = plugin[hook];
+        }
+    });
+
+    return stripped;
+}
+
 // NOTE: I'd like the prefix to contain a null byte, but many rollup packages
 // refuse to touch a file if its name has a null byte.
 const PREFIX = "webdeploy:";
-
-function modify_external(external) {
-    function make(id) {
-        if (id[0] == "/") {
-            return PREFIX + id.slice(1);
-        }
-
-        return id;
-    }
-
-    // NOTE: Currently we only support string or string[].
-
-    if (typeof external === "string") {
-        external = make(external);
-    }
-    else if (Array.isArray(external)) {
-        for (let i = 0;i < external.length;++i) {
-            if (typeof external[i] === "string") {
-                external[i] = make(external[i]);
-            }
-        }
-    }
-
-}
-
-function modify_globals(globals) {
-    Object.keys(globals).forEach((key) => {
-        if (key[0] == "/") {
-            globals[PREFIX + key.slice(1)] = globals[key];
-            delete globals[key];
-        }
-    });
-}
 
 class LoaderAbortException extends Error {
 
@@ -79,7 +60,7 @@ class LoaderAbortException extends Error {
 
 function makePlugin(loader,options) {
     return {
-        name: 'webdeploy-rollup-loader',
+        name: 'webdeploy-core',
 
         load(id) {
             if (id.startsWith(PREFIX)) {
@@ -112,6 +93,10 @@ function makePlugin(loader,options) {
             // If there was no importer, then we failed to resolve the main
             // module and need to abort.
             if (!importer) {
+                if ((source[0] == "." || source[0] == "/")) {
+                    throw new PluginError("Entry point '%s' is not a webdeploy target",source);
+                }
+
                 throw new LoaderAbortException();
             }
 
@@ -124,15 +109,13 @@ class Loader {
     constructor(settings,context) {
         this.settings = settings;
         this.context = context;
+        this.corePlugin = makePlugin(this,{});
         this.moduleMap = new Map();
         this.loadSet = new Set();
         this.currentLoadSet = new Set();
         this.entryTarget = null;
+        this.extra = [];
         this.resolver = null;
-    }
-
-    plugin(options) {
-        return makePlugin(this,options || {});
     }
 
     makeInputOptions(bundleSettings) {
@@ -140,7 +123,7 @@ class Loader {
 
         // Manipulate plugins.
 
-        let plugins = [this.plugin()]; // first
+        let plugins = [this.corePlugin]; // first
 
         if (this.settings.nodeModules) {
             plugins.push(this.makeNodeModulesPlugin());
@@ -152,26 +135,17 @@ class Loader {
 
         const bundlePlugins = bundleSettings.loadPlugins();
         for (let i = 0;i < bundlePlugins.length;++i) {
-            const plugin = bundlePlugins[i];
-            const stripped = { name: plugin.name };
+            plugins.push(strip_plugin(bundlePlugins[i],INPUT_HOOKS));
+        }
 
-            // Strip out hooks that either don't work in this context or are
-            // unsupported by this webdeploy plugin.
-            Object.keys(plugin).forEach((hook) => {
-                if (hook in INPUT_HOOKS) {
-                    stripped[hook] = plugin[hook];
-                }
-            });
-
-            plugins.push(stripped);
+        if (bundleSettings.source) {
+            plugins.push(strip_plugin(bundleSettings.source.getPlugin(this),INPUT_HOOKS));
         }
 
         options.plugins = plugins;
 
-        // Manipulate external.
-
         if (options.external) {
-            modify_external(options.external);
+            options.external = this.modifyExternal(options.external);
         }
 
         return options;
@@ -181,25 +155,18 @@ class Loader {
         const options = Object.assign({},bundleSettings.output);
 
         if (options.globals) {
-            modify_globals(options.globals);
+            this.modifyGlobals(options.globals);
         }
 
         let plugins = [];
 
         const bundlePlugins = bundleSettings.loadPlugins();
         for (let i = 0;i < bundlePlugins.length;++i) {
-            const plugin = bundlePlugins[i];
-            const stripped = { name: plugin.name };
+            plugins.push(strip_plugin(bundlePlugins[i],OUTPUT_HOOKS));
+        }
 
-            // Strip out hooks that either don't work in this context or are
-            // unsupported by this webdeploy plugin.
-            Object.keys(plugin).forEach((hook) => {
-                if (hook in OUTPUT_HOOKS) {
-                    stripped[hook] = plugin[hook];
-                }
-            });
-
-            plugins.push(stripped);
+        if (bundleSettings.source) {
+            plugins.push(strip_plugin(bundleSettings.source.getPlugin(this),OUTPUT_HOOKS));
         }
 
         options.plugins = plugins;
@@ -233,16 +200,21 @@ class Loader {
 
     begin(resolver) {
         this.resolver = resolver;
-        this.currentLoadSet.clear();
-        this.entryTarget = null;
     }
 
     end() {
-        this.resolver = null;
-        return {
+        const info = {
             parentTargets: Array.from(this.currentLoadSet),
-            entryTarget: this.entryTarget
+            entryTarget: this.entryTarget,
+            extra: this.extra
         };
+
+        this.resolver = null;
+        this.currentLoadSet.clear();
+        this.entryTarget = null;
+        this.extra = [];
+
+        return info;
     }
 
     calcExtraneous() {
@@ -253,6 +225,20 @@ class Loader {
         });
 
         return Array.from(targets);
+    }
+
+    lookupTarget(id) {
+        // NOTE: 'id' is prefixed in this context.
+
+        if (id.startsWith(PREFIX)) {
+            return this.moduleMap.get(id.slice(PREFIX.length));
+        }
+
+        return null;
+    }
+
+    addExtra(target) {
+        this.extra.push(target);
     }
 
     load(id) {
@@ -360,6 +346,49 @@ class Loader {
         }
 
         return plugin(opts);
+    }
+
+    makeId(id) {
+        if (id[0] == "/") {
+            let newId = id;
+            if (this.settings.prefix) {
+                newId = this.settings.prefix + newId;
+            }
+            else {
+                newId = newId.slice(1);
+            }
+
+            return PREFIX + newId;
+        }
+
+        return id;
+    }
+
+    modifyExternal(external) {
+        // NOTE: Currently we only support string or string[].
+
+        if (typeof external === "string") {
+            return this.makeId(external);
+        }
+
+        if (Array.isArray(external)) {
+            for (let i = 0;i < external.length;++i) {
+                if (typeof external[i] === "string") {
+                    external[i] = this.makeId(external[i]);
+                }
+            }
+        }
+
+        return external;
+    }
+
+    modifyGlobals(globals) {
+        Object.keys(globals).forEach((key) => {
+            if (key[0] == "/") {
+                globals[this.makeId(key)] = globals[key];
+                delete globals[key];
+            }
+        });
     }
 }
 

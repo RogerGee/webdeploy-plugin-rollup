@@ -180,6 +180,34 @@ class LoaderSettings {
     }
 }
 
+class SourceSettings {
+    constructor(settings,context) {
+        this.context = context;
+
+        this.output = check(this.context,settings,"output","string");
+        this.match = check(this.context,settings,"match","string","array");
+        if (Array.isArray(this.match)) {
+            for (let i = 0;i < this.match.length;++i) {
+                check(format_context(this.context,i),this.match,i,"string");
+            }
+        }
+        else {
+            this.match = [this.match];
+        }
+
+        this._plugin = null;
+    }
+
+    getPlugin(loader) {
+        // Create the plugin once so its state is preserved.
+        if (!this._plugin) {
+            this._plugin = require("./source-loader")(loader,this);
+        }
+
+        return this._plugin;
+    }
+}
+
 class BundleSettings {
     constructor(settings,context) {
         this.context = context;
@@ -232,6 +260,14 @@ class BundleSettings {
         this.input = check(this.context,settings,"input","object");
         this.resolve = check_optional(check,this.context,settings,"resolve",{},"object");
         this.babel = check_optional(check,context,settings,"babel",null,"object");
+
+        this.source = check_optional(check,this.context,settings,"source",null,"object");
+        if (this.source) {
+            this.source = new SourceSettings(
+                this.source,
+                format_context(this.context,"source")
+            );
+        }
     }
 
     loadPlugins() {
