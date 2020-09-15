@@ -8,8 +8,6 @@ const path = require("path");
 const xpath = path.posix;
 const minimatch = require("minimatch");
 const { format } = require("util");
-
-const utils = require("./utils");
 const { PluginError } = require("./error");
 
 // NOTE: I'd like the prefix to contain a null byte, but many rollup packages
@@ -28,7 +26,7 @@ function modify_external(external) {
     // NOTE: Currently we only support string or string[].
 
     if (typeof external === "string") {
-        options.external = make(external);
+        external = make(external);
     }
     else if (Array.isArray(external)) {
         for (let i = 0;i < external.length;++i) {
@@ -234,6 +232,12 @@ class Loader {
         }
         else {
             id = xpath.resolve("/",id).slice(1);
+
+            // Apply prefix when we have no import context.
+            if (this.settings.prefix) {
+                id = this.settings.prefix + "/" + id;
+            }
+
         }
 
         // Use the resolver to inject any custom resolution.

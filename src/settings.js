@@ -4,8 +4,8 @@
  * rollup (webdeploy plugin)
  */
 
+const utils = require("./utils");
 const { format } = require("util");
-
 const { PluginError } = require("./error");
 
 function format_context(context,key) {
@@ -127,6 +127,9 @@ class LoaderSettings {
             "boolean"
         );
 
+        this.prefix = check_optional(check,this.context,settings,"prefix",null,"string");
+        this.alias = check_optional(check,this.context,settings,"alias",{},"object");
+
         this.include = check_array(this.context,settings,"include","string");
         this.exclude = check_optional(check_array,this.context,settings,"exclude",[],"string");
 
@@ -159,6 +162,7 @@ class LoaderSettings {
         );
 
         this._normalizeExtensions();
+        this._normalizePrefix();
     }
 
     _normalizeExtensions() {
@@ -166,6 +170,12 @@ class LoaderSettings {
             if (this.extensions[i][0] != ".") {
                 this.extensions[i] = "." + this.extensions[i];
             }
+        }
+    }
+
+    _normalizePrefix() {
+        if (this.prefix) {
+            this.prefix = utils.strip(this.prefix,"/");
         }
     }
 }
