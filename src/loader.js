@@ -10,6 +10,32 @@ const minimatch = require("minimatch");
 const { format } = require("util");
 const { PluginError } = require("./error");
 
+const INPUT_HOOKS = {
+    buildEnd: 1,
+    buildStart: 1,
+//    resolveId: 1,
+//    load: 1,
+    options: 1,
+    resolveDynamicImport: 1,
+    transform: 1,
+    watchChange: 1
+};
+
+const OUTPUT_HOOKS = {
+//    watchChange: 1,
+	augmentChunkHash: 1,
+	generateBundle: 1,
+	outputOptions: 1,
+	renderChunk: 1,
+	renderDynamicImport: 1,
+	renderError: 1,
+	renderStart: 1,
+	resolveAssetUrl: 1,
+	resolveFileUrl: 1,
+	resolveImportMeta: 1,
+	writeBundle: 1
+};
+
 // NOTE: I'd like the prefix to contain a null byte, but many rollup packages
 // refuse to touch a file if its name has a null byte.
 const PREFIX = "webdeploy:";
@@ -124,23 +150,20 @@ class Loader {
             plugins.push(this.makeBabelPlugin(bundleSettings.babel));
         }
 
-        for (let i = 0;i < bundleSettings.plugins.length;++i) {
-            let packageName;
-            let options;
-            const spec = bundleSettings.plugins[i];
+        const bundlePlugins = bundleSettings.loadPlugins();
+        for (let i = 0;i < bundlePlugins.length;++i) {
+            const plugin = bundlePlugins[i];
+            const stripped = { name: plugin.name };
 
-            if (Array.isArray(spec)) {
-                packageName = spec[0];
-                options = spec[1] || {};
-            }
-            else {
-                packageName = spec;
-                options = {};
-            }
+            // Strip out hooks that either don't work in this context or are
+            // unsupported by this webdeploy plugin.
+            Object.keys(plugin).forEach((hook) => {
+                if (hook in INPUT_HOOKS) {
+                    stripped[hook] = plugin[hook];
+                }
+            });
 
-            const plugin = require(packageName);
-
-            plugins.push(plugin(options));
+            plugins.push(stripped);
         }
 
         options.plugins = plugins;
@@ -160,6 +183,26 @@ class Loader {
         if (options.globals) {
             modify_globals(options.globals);
         }
+
+        let plugins = [];
+
+        const bundlePlugins = bundleSettings.loadPlugins();
+        for (let i = 0;i < bundlePlugins.length;++i) {
+            const plugin = bundlePlugins[i];
+            const stripped = { name: plugin.name };
+
+            // Strip out hooks that either don't work in this context or are
+            // unsupported by this webdeploy plugin.
+            Object.keys(plugin).forEach((hook) => {
+                if (hook in OUTPUT_HOOKS) {
+                    stripped[hook] = plugin[hook];
+                }
+            });
+
+            plugins.push(stripped);
+        }
+
+        options.plugins = plugins;
 
         return options;
     }

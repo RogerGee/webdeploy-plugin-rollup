@@ -184,6 +184,7 @@ class BundleSettings {
     constructor(settings,context) {
         this.context = context;
 
+        this._pluginsLoaded = null;
         this.plugins = check_optional(
             check_array,
             this.context,
@@ -192,38 +193,37 @@ class BundleSettings {
             [],
             "array","string"
         );
-        if (Array.isArray(this.plugins)) {
-            for (let i = 0;i < this.plugins.length;++i) {
-                const localContext = format_context(format("%s.plugins",this.context),i);
-                check(
-                    localContext,
-                    this.plugins,
-                    i,
-                    "string","array"
-                );
 
-                if (Array.isArray(this.plugins[i])) {
-                    const item = this.plugins[i];
-                    if (item.length > 2) {
-                        throw new PluginError(
-                            "invalid config: %s must be [string,object]",
-                            localContext
-                        );
-                    }
+        for (let i = 0;i < this.plugins.length;++i) {
+            const localContext = format_context(format("%s.plugins",this.context),i);
+            check(
+                localContext,
+                this.plugins,
+                i,
+                "string","array"
+            );
 
-                    if (typeof item[0] !== "string") {
-                        throw new PluginError(
-                            "invalid config: %s[0] must be string",
-                            localContext
-                        );
-                    }
+            if (Array.isArray(this.plugins[i])) {
+                const item = this.plugins[i];
+                if (item.length > 2) {
+                    throw new PluginError(
+                        "invalid config: %s must be [string,object]",
+                        localContext
+                    );
+                }
 
-                    if (item[1] && typeof item[1] !== "object") {
-                        throw new PluginError(
-                            "invalid config: %s[0] must be object",
-                            localContext
-                        );
-                    }
+                if (typeof item[0] !== "string") {
+                    throw new PluginError(
+                        "invalid config: %s[0] must be string",
+                        localContext
+                    );
+                }
+
+                if (item[1] && typeof item[1] !== "object") {
+                    throw new PluginError(
+                        "invalid config: %s[0] must be object",
+                        localContext
+                    );
                 }
             }
         }
@@ -232,6 +232,31 @@ class BundleSettings {
         this.input = check(this.context,settings,"input","object");
         this.resolve = check_optional(check,this.context,settings,"resolve",{},"object");
         this.babel = check_optional(check,context,settings,"babel",null,"object");
+    }
+
+    loadPlugins() {
+        // NOTE: We have to cache plugins so that their state is preserved for
+        // both rollup phases: generation and output.
+
+        if (!this._pluginsLoaded) {
+            this._pluginsLoaded = this.plugins.map((spec) => {
+                let packageName;
+                let options;
+
+                if (Array.isArray(spec)) {
+                    packageName = spec[0];
+                    options = spec[1] || {};
+                }
+                else {
+                    packageName = spec;
+                    options = {};
+                }
+
+                return require(packageName)(options);
+            });
+        }
+
+        return this._pluginsLoaded;
     }
 }
 
