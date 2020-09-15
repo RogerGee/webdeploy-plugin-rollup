@@ -93,7 +93,7 @@ function makePlugin(loader,options) {
             // If there was no importer, then we failed to resolve the main
             // module and need to abort.
             if (!importer) {
-                if ((source[0] == "." || source[0] == "/")) {
+                if ((source[0] == "." && source[0] == "/")) {
                     throw new PluginError("Entry point '%s' is not a webdeploy target",source);
                 }
 
@@ -124,6 +124,10 @@ class Loader {
         // Manipulate plugins.
 
         let plugins = [this.corePlugin]; // first
+
+        if (!this.settings.disableNodeEnv) {
+            plugins.push(this.makeProcessEnvPlugin());
+        }
 
         if (this.settings.nodeModules) {
             plugins.push(this.makeNodeModulesPlugin());
@@ -346,6 +350,17 @@ class Loader {
         }
 
         return plugin(opts);
+    }
+
+    makeProcessEnvPlugin() {
+        const env = Object.assign({},this.settings.nodeEnv);
+        const options = {};
+        const plugin = require("rollup-plugin-inject-process-env");
+
+        env.NODE_ENV = this.context.isDevDeployment() ? "development" : "production";
+        options.include = /\.js$/;
+
+        return plugin(env,options);
     }
 
     makeId(id) {
