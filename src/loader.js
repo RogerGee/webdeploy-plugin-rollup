@@ -73,7 +73,7 @@ function makePlugin(loader,options) {
             return null;
         },
 
-        resolveId(source,_importer) {
+        async resolveId(source,_importer) {
             let importer = _importer;
 
             if (importer) {
@@ -86,7 +86,7 @@ function makePlugin(loader,options) {
                 }
             }
 
-            const resolv = loader.resolveId(source,importer);
+            const resolv = await loader.resolveId(source,importer);
             if (resolv) {
                 return PREFIX + resolv;
             }
@@ -119,7 +119,6 @@ class Loader {
         this.currentLoadSet = new Set();
         this.entryTarget = null;
         this.extra = [];
-        this.resolver = null;
     }
 
     makeInputOptions(bundleSettings) {
@@ -290,7 +289,7 @@ class Loader {
         return target.getContent();
     }
 
-    resolveId(source,importer) {
+    async resolveId(source,importer) {
         let id = source;
 
         // Unless configured, we do not allow imports without path
@@ -301,8 +300,8 @@ class Loader {
             }
         }
 
-        // Resolve relative to importer or root. This removes leading path
-        // separator.
+        // Resolve relative to importer or root. This removes leading and
+        // trailing path separators.
         if (importer) {
             id = xpath.resolve(xpath.dirname(importer),id).slice(1);
         }
@@ -315,7 +314,7 @@ class Loader {
             }
         }
 
-        const info = this.resolveIdImpl(id);
+        const info = await this.resolveIdImpl(id);
         id = info.id;
 
         if (id) {
@@ -332,14 +331,9 @@ class Loader {
         return id || null;
     }
 
-    resolveIdImpl(candidateId) {
+    async resolveIdImpl(candidateId,subtree) {
         let id = candidateId;
         let candidates = [];
-
-        // Use the resolver to inject any custom resolution. (NOT IMPLEMENTED)
-        if (this.resolver) {
-            id = this.resolver(id);
-        }
 
         candidates.push(id);
         if (this.moduleMap.has(id)) {
@@ -358,6 +352,20 @@ class Loader {
             }
 
             i += 1;
+        }
+
+        // Resolve tree paths to indexes. We do this here after the in-memory
+        // module checks as the operation may engage the file system.
+
+        if (!subtree && await this.context.tree.testTree(id)) {
+            let i = 0;
+            while (i < this.settings.indexes.length) {
+                const result = await this.resolveIdImpl(id + this.settings.indexes[i],true);
+                if (result.id) {
+                    return result;
+                }
+                i += 1;
+            }
         }
 
         return { id: null, candidates };

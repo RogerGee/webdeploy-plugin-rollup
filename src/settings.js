@@ -4,6 +4,7 @@
  * rollup (webdeploy plugin)
  */
 
+const xpath = require("path").posix;
 const utils = require("./utils");
 const { format } = require("util");
 const { PluginError } = require("./error");
@@ -116,6 +117,8 @@ class NodeModulesSettings {
 
 class LoaderSettings {
     constructor(settings,context) {
+        let localContext;
+
         this.context = context;
 
         this.implicitRoot = check_optional(
@@ -160,9 +163,40 @@ class LoaderSettings {
             [".js","css"],
             "string"
         );
+        localContext = format("%s.extensions",this.context);
+        for (let i = 0;i < this.extensions.length;++i) {
+            check(
+                format_context(localContext,i),
+                this.extensions,
+                i,
+                "string"
+            );
+        }
+
+        this.indexes = check_optional(
+            check,
+            context,
+            settings,
+            "index(es)?",
+            ["index.js"],
+            "string","array"
+        );
+        if (typeof this.indexes === "string") {
+            this.indexes = [this.indexes];
+        }
+        localContext = format("%s.indexes",this.context);
+        for (let i = 0;i < this.indexes.length;++i) {
+            check(
+                format_context(localContext,i),
+                this.indexes,
+                i,
+                "string"
+            );
+        }
 
         this._normalizeExtensions();
         this._normalizePrefix();
+        this._normalizeIndexes();
     }
 
     _normalizeExtensions() {
@@ -176,6 +210,12 @@ class LoaderSettings {
     _normalizePrefix() {
         if (this.prefix) {
             this.prefix = utils.strip(this.prefix,"/");
+        }
+    }
+
+    _normalizeIndexes() {
+        for (let i = 0;i < this.indexes.length;++i) {
+            this.indexes[i] = xpath.resolve("/",this.indexes[i]);
         }
     }
 }
