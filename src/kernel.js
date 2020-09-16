@@ -36,14 +36,11 @@ class Kernel {
         this.context.logger.pushIndent();
 
         // Compile bundles
-        const targets = [];
-        const entryPoints = [];
+        let output = [];
         for (let i = 0;i < this.settings.bundles.length;++i) {
             const nextResults = await this.compileBundle(this.settings.bundles[i]);
             for (let j = 0;j < nextResults.length;++j) {
-                const next = nextResults[j];
-                targets.push(next.target);
-                entryPoints.push(next.entryTarget.getSourceTargetPath());
+                output.push(nextResults[j]);
             }
         }
 
@@ -54,8 +51,8 @@ class Kernel {
         // tree.
         this.context.removeTargets(this.loader.calcExtraneous(),true);
 
-        const output = await this.executeBuilder(targets);
-        await this.processOutput(output,entryPoints);
+        output = await this.executeBuilder(output);
+        await this.processOutput(output);
         await this.finalize();
     }
 
@@ -102,9 +99,12 @@ class Kernel {
         return output;
     }
 
-    async executeBuilder(targets) {
+    async executeBuilder(input) {
         if (this.settings.build.length == 0) {
-            return targets.map((target) => target.getSourceTargetPath());
+            return input.map(({ target, entryTarget }) => ({
+                file: target.getSourceTargetPath(),
+                entry: entryTarget.getSourceTargetPath()
+            }));
         }
 
         const output = [];
@@ -112,8 +112,11 @@ class Kernel {
         this.context.logger.log("Building bundles:");
         this.context.logger.pushIndent();
 
-        targets.forEach((target) => {
-            output.push(target.getSourceTargetPath());
+        input.forEach(({ target, entryTarget }) => {
+            output.push({
+                file: target.getSourceTargetPath(),
+                entry: entryTarget.getSourceTargetPath()
+            });
             this.context.buildTarget(target,this.settings.build);
         });
 
@@ -124,16 +127,16 @@ class Kernel {
         // during the build.
 
         for (let i = 0;i < output.length;++i) {
-            const resolv = this.context.graph.resolveConnection(output[i]);
-            if (resolv != output[i]) {
-                output.splice(i,1,resolv);
+            const resolv = this.context.graph.resolveConnection(output[i].file);
+            if (resolv != output[i].file) {
+                output[i].file = resolv;
             }
         }
 
         return output;
     }
 
-    async processOutput(output,entryPoints) {
+    async processOutput(output) {
         // Look up output from a previous run in cache. If a previous output
         // file was built using one of the entry points of a current output file
         // and the names are different, then we delete the old file.
@@ -144,29 +147,15 @@ class Kernel {
         const deleteList = [];
 
         for (let i = 0; i < prevOutput.length;++i) {
-            const file = prevOutput[i];
-            const nodes = this.context.prevGraph.lookupReverse(file);
+            const prev = prevOutput[i];
 
-            if (!nodes) {
-                continue;
-            }
-
-            let j = 0;
-            while (j < nodes.length) {
-                const index = entryPoints.indexOf(nodes[j]);
-                if (index >= 0) {
-                    if (output.indexOf(file) < 0) {
-                        deleteList.push(file);
-                    }
-
-                    break;
+            if (output.some((record) => record.entry == prev.entry)) {
+                if (!output.some((record) => record.file == prev.file)) {
+                    deleteList.push(prev.file);
                 }
-
-                j += 1;
             }
-
-            if (j >= nodes.length) {
-                keep.push(file);
+            else {
+                keep.push(prev);
             }
         }
 
