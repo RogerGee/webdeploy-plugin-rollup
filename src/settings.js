@@ -194,6 +194,15 @@ class LoaderSettings {
             );
         }
 
+        this.disableBundlesExtension = check_optional(
+            check,
+            this.context,
+            settings,
+            "disableBundlesExtension",
+            false,
+            "boolean"
+        );
+
         this._normalizeAlias();
         this._normalizeExtensions();
         this._normalizePrefix();

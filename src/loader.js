@@ -54,6 +54,7 @@ function strip_plugin(plugin,hooks) {
 // NOTE: I'd like the prefix to contain a null byte, but many rollup packages
 // refuse to touch a file if its name has a null byte.
 const PREFIX = "webdeploy:";
+const BUNDLE_PREFIX = "\0bundle:";
 
 class LoaderAbortException extends Error {
 
@@ -64,16 +65,33 @@ function makePlugin(loader,options) {
         name: 'webdeploy-core',
 
         load(id) {
+            if (id.match(/\0/)) {
+                return null;
+            }
+
             if (id.startsWith(PREFIX)) {
                 const moduleId = id.slice(PREFIX.length);
 
                 return loader.load(moduleId);
             }
 
+            // Do bundles extension for non-webdeploy import.
+
+            if (!loader.settings.disableBundlesExtension) {
+                return loader.loadViaBundlesExtension(id);
+            }
+
             return null;
         },
 
         async resolveId(source,_importer) {
+            if (source.startsWith(BUNDLE_PREFIX)) {
+                return {
+                    id: source,
+                    external: true
+                };
+            }
+
             let importer = _importer;
 
             if (importer) {
@@ -114,11 +132,16 @@ class Loader {
         this.moduleMap = new Map();
         this.loadSet = new Set();
 
+        if (this.settings.nodeModules) {
+            this.nodeResolve = this.makeNodeModulesPlugin();
+        }
+
         // Local execution properties:
         this.bundleSettings = null;
         this.currentLoadSet = new Set();
         this.entryTarget = null;
         this.extra = [];
+        this.refs = [];
     }
 
     makeInputOptions(bundleSettings) {
@@ -132,8 +155,8 @@ class Loader {
             plugins.push(this.makeProcessEnvPlugin(bundleSettings.nodeEnv));
         }
 
-        if (this.settings.nodeModules) {
-            plugins.push(this.makeNodeModulesPlugin());
+        if (this.nodeResolve) {
+            plugins.push(this.nodeResolve);
         }
 
         if (bundleSettings.babel) {
@@ -153,6 +176,9 @@ class Loader {
 
         if (options.external) {
             options.external = this.modifyExternal(options.external);
+        }
+        if (!Array.isArray(options.external)) {
+            options.external = [options.external].filter((x) => !!x);
         }
 
         return options;
@@ -236,13 +262,15 @@ class Loader {
         const info = {
             parentTargets: Array.from(this.currentLoadSet),
             entryTarget: this.entryTarget,
-            extra: this.extra
+            extra: this.extra,
+            refs: this.refs
         };
 
         this.bundleSettings = null;
         this.currentLoadSet.clear();
         this.entryTarget = null;
         this.extra = [];
+        this.refs = [];
 
         return info;
     }
@@ -287,6 +315,54 @@ class Loader {
         }
 
         return target.getContent();
+    }
+
+    loadViaBundlesExtension(id) {
+        // Use the node-resolve plugin to get package.json contents.
+        const data = this.nodeResolve.getPackageInfoForId(id);
+        if (!data) {
+            return null;
+        }
+
+        const { packageJson } = data;
+
+        // Use non-standard 'bundles' property to pull information.
+        const bundles = packageJson.bundles;
+        if (!bundles || typeof bundles !== "object" || Array.isArray(bundles)) {
+            return;
+        }
+
+        // Pull bundle refs and globals.
+        if (bundles.refs && Array.isArray(bundles.refs)) {
+            const local = this.context.isDevDeployment();
+
+            let root = xpath.relative(this.context.tree.getPath(),data.root);
+            root = root.replace(/\\/g,"/");
+
+            let n = 0;
+            bundles.refs.forEach((file) => {
+                if (typeof file === "string") {
+                    this.refs.push(path.resolvefile);
+                    n += 1;
+                }
+                else if (typeof file === "object" && file.local && file.remote) {
+                    const ref = local ? xpath.join(root,file.local) : file.remote;
+                    if (typeof ref === "string") {
+                        this.refs.push(ref);
+                        n += 1;
+                    }
+                }
+            });
+
+            // If a global was provided, rewrite this module.
+            if (n > 0 && bundles.global && typeof bundles.global === "string") {
+                const bundleId = BUNDLE_PREFIX + id;
+                this.bundleSettings.output.globals[bundleId] = bundles.global;
+                return "export { default } from \"" + bundleId + "\"";
+            }
+        }
+
+        return null;
     }
 
     async resolveId(source,importer) {

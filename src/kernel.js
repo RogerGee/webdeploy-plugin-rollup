@@ -37,11 +37,14 @@ class Kernel {
 
         // Compile bundles
         let output = [];
+        let refs = [];
         for (let i = 0;i < this.settings.bundles.length;++i) {
-            const nextResults = await this.compileBundle(this.settings.bundles[i]);
-            for (let j = 0;j < nextResults.length;++j) {
-                output.push(nextResults[j]);
-            }
+            const {
+                output: nextOutput,
+                refs: nextRefs
+            } = await this.compileBundle(this.settings.bundles[i]);
+            output = output.concat(nextOutput);
+            refs = refs.concat(nextRefs);
         }
 
         this.context.logger.popIndent();
@@ -52,8 +55,9 @@ class Kernel {
         this.context.removeTargets(this.loader.calcExtraneous(),true);
 
         output = await this.executeBuilder(output);
-        await this.processOutput(output);
-        await this.finalize();
+        refs = refs.concat(await this.processOutput(output));
+
+        await this.finalize(refs);
     }
 
     async compileBundle(bundleSettings) {
@@ -82,7 +86,7 @@ class Kernel {
 
         this.loader.begin(bundleSettings);
         const results = await this.loader.build();
-        const { entryTarget, parentTargets, extra } = this.loader.end();
+        const { entryTarget, parentTargets, extra, refs } = this.loader.end();
 
         let output = extra.map((target) => ({ target, entryTarget }));
 
@@ -108,7 +112,7 @@ class Kernel {
             return { target, entryTarget };
         }));
 
-        return output;
+        return { output, refs };
     }
 
     async executeBuilder(input) {
@@ -193,9 +197,11 @@ class Kernel {
         const augmented = output.concat(keep);
 
         await this.context.writeCacheProperty(OUTPUT_CACHE_KEY,augmented);
+
+        return augmented.map((record) => record.file);
     }
 
-    async finalize() {
+    async finalize(refs) {
         return this.context.chain("write",this.settings.write);
     }
 }
