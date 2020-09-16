@@ -4,6 +4,8 @@
  * rollup (webdeploy plugin)
  */
 
+const path = require("path");
+
 function strip(string,match) {
     return stripLeading(stripTrailing(string,match),match);
 }
@@ -23,8 +25,23 @@ function stripTrailing(string,match) {
     return string;
 }
 
+function makeRandomId(prefix,suffix) {
+    prefix = prefix || "";
+    suffix = suffix || "";
+
+    return prefix+Math.floor(Math.random() * 10**20).toString(36)+suffix;
+}
+
+function applyFileSuffix(filePath,suffix) {
+    const parsed = path.parse(filePath);
+    parsed.name += suffix;
+    return path.join(parsed.dir,parsed.name + parsed.ext);
+}
+
 module.exports = {
     strip,
     stripLeading,
-    stripTrailing
+    stripTrailing,
+    makeRandomId,
+    applyFileSuffix
 };

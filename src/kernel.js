@@ -6,8 +6,8 @@
 
 const fs = require("fs");
 const path = require("path");
+const utils = require("./utils");
 const { format } = require("util");
-
 const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
 const { Loader, LoaderAbortException } = require("./loader");
@@ -75,6 +75,11 @@ class Kernel {
             );
         }
 
+        const isDev = this.context.isDevDeployment();
+        if (!isDev) {
+            bundleSettings.applyCacheBusting();
+        }
+
         this.loader.begin(bundleSettings);
         const results = await this.loader.build();
         const { entryTarget, parentTargets, extra } = this.loader.end();
@@ -82,6 +87,13 @@ class Kernel {
         let output = extra.map((target) => ({ target, entryTarget }));
 
         output = output.concat(results.map((chunk) => {
+            if (!isDev && bundleSettings.cacheBusting) {
+                chunk.fileName = utils.applyFileSuffix(
+                    chunk.fileName,
+                    bundleSettings.cacheBusting
+                );
+            }
+
             const nmodules = Object.keys(chunk.modules).length;
             this.context.logger.log(
                 format("_%s_ with %d modules",chunk.fileName,nmodules)
