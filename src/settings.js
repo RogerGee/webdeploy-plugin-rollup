@@ -161,27 +161,8 @@ class LoaderSettings {
             "string"
         );
 
-        this.nodeEnv = check_optional(
-            check,
-            this.context,
-            settings,
-            "nodeEnv",
-            {},
-            "object"
-        );
-
-        this.disableNodeEnv = check_optional(
-            check,
-            this.context,
-            settings,
-            "disableNodeEnv",
-            false,
-            "boolean"
-        );
-
         this._normalizeExtensions();
         this._normalizePrefix();
-        this._normalizeNodeEnv();
     }
 
     _normalizeExtensions() {
@@ -195,16 +176,6 @@ class LoaderSettings {
     _normalizePrefix() {
         if (this.prefix) {
             this.prefix = utils.strip(this.prefix,"/");
-        }
-    }
-
-    _normalizeNodeEnv() {
-        const keys = Object.keys(this.nodeEnv);
-        for (let i = 0;i < keys.length;++i) {
-            const key = keys[i];
-            if (typeof this.nodeEnv[key] !== "string") {
-                this.nodeEnv[key] = JSON.stringify(this.nodeEnv[key]);
-            }
         }
     }
 }
@@ -297,6 +268,17 @@ class BundleSettings {
                 format_context(this.context,"source")
             );
         }
+
+        this.nodeEnv = check_optional(
+            check,
+            this.context,
+            settings,
+            "nodeEnv",
+            false,
+            "object","boolean"
+        );
+
+        this._normalizeNodeEnv();
     }
 
     loadPlugins() {
@@ -322,6 +304,20 @@ class BundleSettings {
         }
 
         return this._pluginsLoaded;
+    }
+
+    _normalizeNodeEnv() {
+        if (!this.nodeEnv) {
+            return;
+        }
+
+        const keys = Object.keys(this.nodeEnv);
+        for (let i = 0;i < keys.length;++i) {
+            const key = keys[i];
+            if (typeof this.nodeEnv[key] !== "string") {
+                this.nodeEnv[key] = JSON.stringify(this.nodeEnv[key]);
+            }
+        }
     }
 }
 

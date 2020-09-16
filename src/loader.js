@@ -125,8 +125,8 @@ class Loader {
 
         let plugins = [this.corePlugin]; // first
 
-        if (!this.settings.disableNodeEnv) {
-            plugins.push(this.makeProcessEnvPlugin());
+        if (bundleSettings.nodeEnv) {
+            plugins.push(this.makeProcessEnvPlugin(bundleSettings.nodeEnv));
         }
 
         if (this.settings.nodeModules) {
@@ -352,8 +352,8 @@ class Loader {
         return plugin(opts);
     }
 
-    makeProcessEnvPlugin() {
-        const env = Object.assign({},this.settings.nodeEnv);
+    makeProcessEnvPlugin(nodeEnv) {
+        const env = nodeEnv === true ? {} : Object.assign({},nodeEnv);
         const options = {};
         const plugin = require("rollup-plugin-inject-process-env");
 
