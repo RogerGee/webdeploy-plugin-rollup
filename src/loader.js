@@ -6,6 +6,7 @@
 
 const path = require("path");
 const xpath = path.posix;
+const rollup = require("rollup");
 const minimatch = require("minimatch");
 const { format } = require("util");
 const { PluginError } = require("./error");
@@ -112,6 +113,9 @@ class Loader {
         this.corePlugin = makePlugin(this,{});
         this.moduleMap = new Map();
         this.loadSet = new Set();
+
+        // Local execution properties:
+        this.bundleSettings = null;
         this.currentLoadSet = new Set();
         this.entryTarget = null;
         this.extra = [];
@@ -161,6 +165,9 @@ class Loader {
         if (options.globals) {
             this.modifyGlobals(options.globals);
         }
+        else {
+            options.globals = {};
+        }
 
         let plugins = [];
 
@@ -202,8 +209,28 @@ class Loader {
         return this.moduleMap.size;
     }
 
-    begin(resolver) {
-        this.resolver = resolver;
+    begin(bundleSettings) {
+        this.bundleSettings = {
+            input: this.makeInputOptions(bundleSettings),
+            output: this.makeOutputOptions(bundleSettings)
+        };
+    }
+
+    async build() {
+        let bundle;
+        try {
+            bundle = await rollup.rollup(this.bundleSettings.input);
+        } catch (ex) {
+            if (ex instanceof LoaderAbortException) {
+                return [];
+            }
+
+            throw ex;
+        }
+
+        const results = await bundle.generate(this.bundleSettings.output);
+
+        return results.output;
     }
 
     end() {
@@ -213,7 +240,7 @@ class Loader {
             extra: this.extra
         };
 
-        this.resolver = null;
+        this.bundleSettings = null;
         this.currentLoadSet.clear();
         this.entryTarget = null;
         this.extra = [];
@@ -274,7 +301,8 @@ class Loader {
             }
         }
 
-        // Resolve relative to importer or root.
+        // Resolve relative to importer or root. This removes leading path
+        // separator.
         if (importer) {
             id = xpath.resolve(xpath.dirname(importer),id).slice(1);
         }
@@ -285,31 +313,54 @@ class Loader {
             if (this.settings.prefix) {
                 id = this.settings.prefix + "/" + id;
             }
-
         }
 
-        // Use the resolver to inject any custom resolution.
-        if (this.resolver) {
-            id = this.resolver.resolve(id);
-        }
+        const info = this.resolveIdImpl(id);
+        id = info.id;
 
-        if (this.moduleMap.has(id)) {
+        if (id) {
             return id;
         }
+
+        // See if any of the candidates are in globals. These modules exist
+        // implicitly.
+
+        id = info.candidates.find((id) => {
+            return this.makeId("/" + id,true) in this.bundleSettings.output.globals;
+        });
+
+        return id || null;
+    }
+
+    resolveIdImpl(candidateId) {
+        let id = candidateId;
+        let candidates = [];
+
+        // Use the resolver to inject any custom resolution. (NOT IMPLEMENTED)
+        if (this.resolver) {
+            id = this.resolver(id);
+        }
+
+        candidates.push(id);
+        if (this.moduleMap.has(id)) {
+            return { id, candidates };
+        }
+
+        // Try the ID with one of the configured extensions.
 
         let i = 0;
         while (i < this.settings.extensions.length) {
             const idWithExt = id + this.settings.extensions[i];
+            candidates.push(idWithExt);
 
-            // Try the ID with the extension.
             if (this.moduleMap.has(idWithExt)) {
-                return idWithExt;
+                return { id: idWithExt, candidates };
             }
 
             i += 1;
         }
 
-        return null;
+        return { id: null, candidates };
     }
 
     makeNodeModulesPlugin() {
@@ -363,10 +414,10 @@ class Loader {
         return plugin(env,options);
     }
 
-    makeId(id) {
+    makeId(id,noprefix) {
         if (id[0] == "/") {
             let newId = id;
-            if (this.settings.prefix) {
+            if (this.settings.prefix && !noprefix) {
                 newId = this.settings.prefix + newId;
             }
             else {

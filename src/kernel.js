@@ -6,7 +6,6 @@
 
 const fs = require("fs");
 const path = require("path");
-const rollup = require("rollup");
 const { format } = require("util");
 
 const { PluginError } = require("./error");
@@ -79,8 +78,8 @@ class Kernel {
             );
         }
 
-        this.loader.begin();
-        const results = await this.buildBundle(bundleSettings);
+        this.loader.begin(bundleSettings);
+        const results = await this.loader.build();
         const { entryTarget, parentTargets, extra } = this.loader.end();
 
         let output = extra.map((target) => ({ target, entryTarget }));
@@ -101,26 +100,6 @@ class Kernel {
         }));
 
         return output;
-    }
-
-    async buildBundle(bundleSettings) {
-        const inputOptions = this.loader.makeInputOptions(bundleSettings);
-
-        let bundle;
-        try {
-            bundle = await rollup.rollup(inputOptions);
-        } catch (ex) {
-            if (ex instanceof LoaderAbortException) {
-                return [];
-            }
-
-            throw ex;
-        }
-
-        const outputOptions = this.loader.makeOutputOptions(bundleSettings);
-        const results = await bundle.generate(outputOptions);
-
-        return results.output;
     }
 
     async executeBuilder(targets) {
