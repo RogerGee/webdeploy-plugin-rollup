@@ -131,7 +131,7 @@ class LoaderSettings {
         );
 
         this.prefix = check_optional(check,this.context,settings,"prefix",null,"string");
-        this.alias = check_optional(check,this.context,settings,"alias",{},"object");
+        this.alias = check_optional(check,this.context,settings,"alias",null,"object");
 
         this.include = check_array(this.context,settings,"include","string");
         this.exclude = check_optional(check_array,this.context,settings,"exclude",[],"string");
@@ -194,9 +194,21 @@ class LoaderSettings {
             );
         }
 
+        this._normalizeAlias();
         this._normalizeExtensions();
         this._normalizePrefix();
         this._normalizeIndexes();
+    }
+
+    _normalizeAlias() {
+        if (!this.alias) {
+            return;
+        }
+        Object.keys(this.alias).forEach((key) => {
+            if (typeof this.alias[key] !== "string") {
+                this.alias[key] = JSON.stringify(this.alias[key]);
+            }
+        });
     }
 
     _normalizeExtensions() {

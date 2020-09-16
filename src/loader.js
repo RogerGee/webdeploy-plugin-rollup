@@ -292,6 +292,13 @@ class Loader {
     async resolveId(source,importer) {
         let id = source;
 
+        // Resolve aliases. We do this first since aliases always refer to the
+        // import source string, not the resolved ID.
+
+        if (this.settings.alias) {
+            id = this.resolveAlias(id);
+        }
+
         // Unless configured, we do not allow imports without path
         // characteristics to access webdeploy modules.
         if (!this.settings.implicitRoot) {
@@ -369,6 +376,31 @@ class Loader {
         }
 
         return { id: null, candidates };
+    }
+
+    resolveAlias(id) {
+        const parts = id.split(xpath.sep);
+
+        // Match a path prefix to replace for a module alias.
+
+        let i = 1;
+        let prefix = parts[0];
+        while (true) {
+            if (prefix in this.settings.alias) {
+                id = xpath.join(this.settings.alias[prefix],...parts.slice(i));
+                return xpath.resolve("/",id);
+            }
+
+            if (!parts[i]) {
+                break;
+            }
+
+            prefix = path.join(prefix,parts[i++])
+        }
+
+        // No alias found.
+
+        return id;
     }
 
     makeNodeModulesPlugin() {
