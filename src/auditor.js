@@ -20,6 +20,7 @@ class Auditor {
         this.settings = settings;
 
         this.auditBuild();
+        this.auditManifest();
     }
 
     auditBuild() {
@@ -28,6 +29,12 @@ class Auditor {
             this.settings.build.forEach((handler) => {
                 this.context.requireBuild(handler);
             });
+        }
+    }
+
+    auditManifest() {
+        if (this.settings.manifest) {
+            this.context.requireDeploy("manifest",{ output:"dummy" });
         }
     }
 }

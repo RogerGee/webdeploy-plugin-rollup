@@ -267,10 +267,6 @@ class SourceSettings {
 
         return this._plugin;
     }
-
-    applyCacheBusting(id) {
-        this.output = utils.applyFileSuffix(this.output,id);
-    }
 }
 
 class BundleSettings {
@@ -343,18 +339,6 @@ class BundleSettings {
             "object","boolean"
         );
 
-        this.cacheBusting = check_optional(
-            check,
-            this.context,
-            settings,
-            "cacheBusting",
-            "",
-            "boolean"
-        );
-        if (this.cacheBusting) {
-            this.cacheBusting = "." + utils.makeRandomId();
-        }
-
         this._normalizeNodeEnv();
     }
 
@@ -381,14 +365,6 @@ class BundleSettings {
         }
 
         return this._pluginsLoaded;
-    }
-
-    applyCacheBusting() {
-        if (this.cacheBusting) {
-            if (this.source) {
-                this.source.applyCacheBusting(this.cacheBusting);
-            }
-        }
     }
 
     _normalizeNodeEnv() {
@@ -422,7 +398,7 @@ class PluginSettings {
             });
 
         this.build = check_optional(check_array,"settings",settings,"build",[],"object","string");
-
+        this.manifest = check_optional(check,"settings",settings,"manifest",null,"object");
         this.write = check_optional(check,"settings",settings,"write",{},"object");
     }
 }

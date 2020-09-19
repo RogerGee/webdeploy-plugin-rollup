@@ -12,9 +12,17 @@ const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
 const { Loader, LoaderAbortException } = require("./loader");
 
-const OUTPUT_CACHE_KEY = "rollup.output";
-
 class Kernel {
+    static resolveGroups(groups) {
+        groups.forEach((group) => {
+            for (let i = 0;i < group.length;++i) {
+                if (typeof group[i] === "object") {
+                    group[i] = group[i].file;
+                }
+            }
+        });
+    }
+
     constructor(context,settings) {
         this.context = context;
         if (settings.__audited) {
@@ -36,15 +44,18 @@ class Kernel {
         this.context.logger.pushIndent();
 
         // Compile bundles
-        let output = [];
-        let refs = [];
+        let groups = [];
+        let targets = [];
         for (let i = 0;i < this.settings.bundles.length;++i) {
-            const {
-                output: nextOutput,
-                refs: nextRefs
-            } = await this.compileBundle(this.settings.bundles[i]);
-            output = output.concat(nextOutput);
-            refs = refs.concat(nextRefs);
+            const group = [];
+            const result = await this.compileBundle(this.settings.bundles[i]);
+            result.refs.forEach((ref) => group.push(ref));
+            result.targets.forEach((target) => {
+                const entry = { target, file: target.getSourceTargetPath() };
+                targets.push(entry);
+                group.push(entry);
+            });
+            groups.push(group);
         }
 
         this.context.logger.popIndent();
@@ -54,10 +65,8 @@ class Kernel {
         // tree.
         this.context.removeTargets(this.loader.calcExtraneous(),true);
 
-        output = await this.executeBuilder(output);
-        refs = refs.concat(await this.processOutput(output));
-
-        await this.finalize(refs);
+        await this.executeBuilder(targets);
+        await this.finalize(groups);
     }
 
     async compileBundle(bundleSettings) {
@@ -79,28 +88,19 @@ class Kernel {
             );
         }
 
-        const isDev = this.context.isDevDeployment();
-        if (!isDev) {
-            bundleSettings.applyCacheBusting();
-        }
-
         this.loader.begin(bundleSettings);
         const results = await this.loader.build();
         const { entryTarget, parentTargets, extra, refs } = this.loader.end();
 
-        let output = extra.map((target) => ({ target, entryTarget }));
+        let targets = extra.slice();
 
-        output = output.concat(results.map((chunk) => {
-            if (!isDev && bundleSettings.cacheBusting) {
-                chunk.fileName = utils.applyFileSuffix(
-                    chunk.fileName,
-                    bundleSettings.cacheBusting
-                );
-            }
-
-            const nmodules = Object.keys(chunk.modules).length;
+        targets = targets.concat(results.map((chunk) => {
             this.context.logger.log(
-                format("_%s_ with %d modules",chunk.fileName,nmodules)
+                format(
+                    "_%s_ with %d modules",
+                    chunk.fileName,
+                    Object.keys(chunk.modules).length
+                )
             );
 
             const target = this.context.resolveTargets(
@@ -109,30 +109,21 @@ class Kernel {
             );
             target.stream.end(chunk.code);
 
-            return { target, entryTarget };
+            return target;
         }));
 
-        return { output, refs };
+        return { entryTarget, targets, refs };
     }
 
-    async executeBuilder(input) {
+    async executeBuilder(targets) {
         if (this.settings.build.length == 0) {
-            return input.map(({ target, entryTarget }) => ({
-                file: target.getSourceTargetPath(),
-                entry: entryTarget.getSourceTargetPath()
-            }));
+            return;
         }
-
-        const output = [];
 
         this.context.logger.log("Building bundles:");
         this.context.logger.pushIndent();
 
-        input.forEach(({ target, entryTarget }) => {
-            output.push({
-                file: target.getSourceTargetPath(),
-                entry: entryTarget.getSourceTargetPath()
-            });
+        input.forEach(({ target, file }) => {
             this.context.buildTarget(target,this.settings.build);
         });
 
@@ -140,68 +131,27 @@ class Kernel {
         this.context.logger.popIndent();
 
         // Resolve connections from old target names in case any names changed
-        // during the build.
+        // during the build. This updates the name in the target ref entry.
 
-        for (let i = 0;i < output.length;++i) {
-            const resolv = this.context.graph.resolveConnection(output[i].file);
-            if (resolv != output[i].file) {
-                output[i].file = resolv;
+        for (let i = 0;i < targets.length;++i) {
+            const resolv = this.context.graph.resolveConnection(targets[i].file);
+            if (resolv != targets[i].file) {
+                targets[i].file = resolv;
             }
         }
-
-        return output;
     }
 
-    async processOutput(output) {
-        // Look up output from a previous run in cache. If a previous output
-        // file was built using one of the entry points of a current output file
-        // and the names are different, then we delete the old file.
+    async finalize(groups) {
+        if (this.settings.manifest) {
+            const manifestSettings = this.settings.manifest;
 
-        const prevOutput = await this.context.readCacheProperty(OUTPUT_CACHE_KEY) || [];
+            Kernel.resolveGroups(groups);
+            manifestSettings.refs = groups;
+            manifestSettings.write = this.settings.write;
 
-        const keep = [];
-        const deleteList = [];
-
-        for (let i = 0; i < prevOutput.length;++i) {
-            const prev = prevOutput[i];
-
-            if (output.some((record) => record.entry == prev.entry)) {
-                if (!output.some((record) => record.file == prev.file)) {
-                    deleteList.push(prev.file);
-                }
-            }
-            else {
-                keep.push(prev);
-            }
+            return this.context.chain("manifest",manifestSettings);
         }
 
-        // Delete old output files that are no longer needed.
-
-        for (let i = 0;i < deleteList.length;++i) {
-            const filepath = this.context.makeDeployPath(deleteList[i]);
-            const err = await new Promise((resolve) => {
-                fs.unlink(filepath,resolve);
-            });
-
-            this.context.logger.log("Unlinked _" + filepath + "_");
-
-            if (err) {
-                if (err.code != "ENOENT") {
-                    throw err;
-                }
-            }
-        }
-
-        // Save output files in deployment cache.
-
-        const augmented = output.concat(keep);
-
-        await this.context.writeCacheProperty(OUTPUT_CACHE_KEY,augmented);
-
-        return augmented.map((record) => record.file);
-    }
-
-    async finalize(refs) {
         return this.context.chain("write",this.settings.write);
     }
 }

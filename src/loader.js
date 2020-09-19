@@ -98,7 +98,7 @@ function makePlugin(loader,options) {
                 if (importer.startsWith(PREFIX)) {
                     importer = "/" + importer.slice(PREFIX.length);
                 }
-                else if (source[0] == ".") {
+                else if (source[0] == "." && source[0] == "/") {
                     // Cannot import webdeploy module from non-webdeploy module.
                     return null;
                 }
@@ -112,7 +112,7 @@ function makePlugin(loader,options) {
             // If there was no importer, then we failed to resolve the main
             // module and need to abort.
             if (!importer) {
-                if ((source[0] == "." && source[0] == "/")) {
+                if ((source[0] != "." && source[0] != "/")) {
                     throw new PluginError("Entry point '%s' is not a webdeploy target",source);
                 }
 
