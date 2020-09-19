@@ -14,8 +14,8 @@ const { PluginError } = require("./error");
 const INPUT_HOOKS = {
     buildEnd: 1,
     buildStart: 1,
-//    resolveId: 1,
-//    load: 1,
+    resolveId: 1,
+    load: 1,
     options: 1,
     resolveDynamicImport: 1,
     transform: 1,
@@ -23,7 +23,7 @@ const INPUT_HOOKS = {
 };
 
 const OUTPUT_HOOKS = {
-//    watchChange: 1,
+    watchChange: 1,
 	augmentChunkHash: 1,
 	generateBundle: 1,
 	outputOptions: 1,
@@ -151,16 +151,8 @@ class Loader {
 
         let plugins = [this.corePlugin]; // first
 
-        if (bundleSettings.nodeEnv) {
-            plugins.push(this.makeProcessEnvPlugin(bundleSettings.nodeEnv));
-        }
-
         if (this.nodeResolve) {
             plugins.push(this.nodeResolve);
-        }
-
-        if (bundleSettings.babel) {
-            plugins.push(this.makeBabelPlugin(bundleSettings.babel));
         }
 
         const bundlePlugins = bundleSettings.loadPlugins();
@@ -168,8 +160,16 @@ class Loader {
             plugins.push(strip_plugin(bundlePlugins[i],INPUT_HOOKS));
         }
 
+        if (bundleSettings.nodeEnv) {
+            plugins.push(this.makeProcessEnvPlugin(bundleSettings.nodeEnv));
+        }
+
         if (bundleSettings.source) {
             plugins.push(strip_plugin(bundleSettings.source.getPlugin(this),INPUT_HOOKS));
+        }
+
+        if (bundleSettings.babel) {
+            plugins.push(this.makeBabelPlugin(bundleSettings.babel));
         }
 
         options.plugins = plugins;
