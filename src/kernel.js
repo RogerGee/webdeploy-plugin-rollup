@@ -145,8 +145,10 @@ class Kernel {
         if (this.settings.manifest) {
             const manifestSettings = this.settings.manifest;
 
-            Kernel.resolveGroups(groups);
-            manifestSettings.refs = groups;
+            if (groups) {
+                Kernel.resolveGroups(groups);
+                manifestSettings.refs = groups;
+            }
             manifestSettings.write = this.settings.write;
 
             return this.context.chain("manifest",manifestSettings);
