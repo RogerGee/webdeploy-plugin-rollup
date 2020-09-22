@@ -383,6 +383,11 @@ class Loader {
             }
         }
 
+        // Apply prefix when the import is absolute.
+        if (this.settings.prefix && id[0] == "/") {
+            id = "/" + this.settings.prefix + id;
+        }
+
         // Resolve relative to importer or root. This removes leading and
         // trailing path separators.
         if (importer) {
@@ -390,11 +395,6 @@ class Loader {
         }
         else {
             id = xpath.resolve("/",id).slice(1);
-
-            // Apply prefix when we have no import context.
-            if (this.settings.prefix) {
-                id = this.settings.prefix + "/" + id;
-            }
         }
 
         const info = await this.resolveIdImpl(id);
