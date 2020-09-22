@@ -394,18 +394,23 @@ class Loader {
             }
         }
 
-        // Apply prefix when the import is absolute.
-        if (this.settings.prefix && id[0] == "/") {
-            id = "/" + this.settings.prefix + id;
-        }
-
         // Resolve relative to importer or root. This removes leading and
         // trailing path separators.
         if (importer) {
+            // Apply prefix when the import is absolute.
+            if (this.settings.prefix && id[0] == "/") {
+                id = "/" + this.settings.prefix + id;
+            }
+
             id = xpath.resolve(xpath.dirname(importer),id).slice(1);
         }
         else {
             id = xpath.resolve("/",id).slice(1);
+
+            // Ensure ID is qualified with the prefix if configured.
+            if (this.settings.prefix) {
+                id = this.settings.prefix + "/" + id;
+            }
         }
 
         const info = await this.resolveIdImpl(id);
@@ -466,7 +471,7 @@ class Loader {
     }
 
     resolveAlias(id) {
-        const parts = id.split(xpath.sep);
+        const parts = id.split(xpath.sep).filter((x) => !!x);
 
         // Match a path prefix to replace for a module alias.
 
@@ -474,15 +479,15 @@ class Loader {
         let prefix = parts[0];
         while (true) {
             if (prefix in this.settings.alias) {
-                id = xpath.join(this.settings.alias[prefix],...parts.slice(i));
-                return xpath.resolve("/",id);
+                const newId = xpath.join(this.settings.alias[prefix],...parts.slice(i));
+                return xpath.resolve("/",newId);
             }
 
             if (!parts[i]) {
                 break;
             }
 
-            prefix = path.join(prefix,parts[i++])
+            prefix = prefix + xpath.sep + parts[i++];
         }
 
         // No alias found.
