@@ -123,7 +123,7 @@ class Kernel {
         this.context.logger.log("Building bundles:");
         this.context.logger.pushIndent();
 
-        input.forEach(({ target, file }) => {
+        targets.forEach(({ target, file }) => {
             this.context.buildTarget(target,this.settings.build);
         });
 
