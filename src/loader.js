@@ -342,11 +342,18 @@ class Loader {
             let n = 0;
             bundles.refs.forEach((file) => {
                 if (typeof file === "string") {
-                    this.refs.push(path.resolvefile);
+                    this.refs.push(xpath.join(root,file));
                     n += 1;
                 }
-                else if (typeof file === "object" && file.local && file.remote) {
-                    const ref = local ? xpath.join(root,file.local) : file.remote;
+                else if (typeof file === "object" && file.local) {
+                    let ref;
+                    if (local || !file.remote) {
+                        ref = xpath.join(root,file.local);
+                    }
+                    else {
+                        ref = file.remote;
+                    }
+
                     if (typeof ref === "string") {
                         this.refs.push(ref);
                         n += 1;
@@ -358,7 +365,14 @@ class Loader {
             if (n > 0 && bundles.global && typeof bundles.global === "string") {
                 const bundleId = BUNDLE_PREFIX + id;
                 this.bundleSettings.output.globals[bundleId] = bundles.global;
-                return "export { default } from \"" + bundleId + "\"";
+
+                let code = format("export { default } from \"%s\";\n",bundleId);
+                if (bundles.exports && Array.isArray(bundles.exports)) {
+                    const inner = bundles.exports.join(", ");
+                    code += format("export { %s } from \"%s\";\n",inner,bundleId);
+                }
+
+                return code;
             }
         }
 
