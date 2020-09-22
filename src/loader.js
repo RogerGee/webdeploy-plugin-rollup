@@ -177,9 +177,6 @@ class Loader {
         if (options.external) {
             options.external = this.modifyExternal(options.external);
         }
-        if (!Array.isArray(options.external)) {
-            options.external = [options.external].filter((x) => !!x);
-        }
 
         return options;
     }
