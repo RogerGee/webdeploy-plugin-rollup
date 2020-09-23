@@ -372,6 +372,10 @@ class Loader {
 
                 return code;
             }
+
+            if (n > 0) {
+                return "";
+            }
         }
 
         return null;
