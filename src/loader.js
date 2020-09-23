@@ -323,8 +323,9 @@ class Loader {
 
         const { packageJson } = data;
 
-        // Use non-standard 'bundles' property to pull information.
-        const bundles = packageJson.bundles;
+        // Use non-standard 'bundles' (or 'bundle') property to pull
+        // information.
+        const bundles = packageJson.bundles || packageJson.bundle;
         if (!bundles || typeof bundles !== "object" || Array.isArray(bundles)) {
             return;
         }
