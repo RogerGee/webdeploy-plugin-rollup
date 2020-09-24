@@ -340,7 +340,7 @@ class Loader {
             let n = 0;
             bundles.refs.forEach((file) => {
                 if (typeof file === "string") {
-                    this.refs.push(xpath.join(root,file));
+                    this.refs.unshift(xpath.join(root,file));
                     n += 1;
                 }
                 else if (typeof file === "object" && file.local) {
@@ -353,7 +353,7 @@ class Loader {
                     }
 
                     if (typeof ref === "string") {
-                        this.refs.push(ref);
+                        this.refs.unshift(ref);
                         n += 1;
                     }
                 }
