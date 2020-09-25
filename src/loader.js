@@ -141,7 +141,9 @@ class Loader {
         this.currentLoadSet = new Set();
         this.entryTarget = null;
         this.extra = [];
-        this.refs = [];
+        this.externalImports = [];
+        this.refs = new Map(); // moduleId:string -> ref:string[]
+        this.refpos = 0;
     }
 
     makeInputOptions(bundleSettings) {
@@ -251,6 +253,7 @@ class Loader {
         }
 
         const results = await bundle.generate(this.bundleSettings.output);
+        results.output.forEach((chunk) => chunk.imports.forEach((i) => this.externalImports.push(i)));
 
         return results.output;
     }
@@ -260,14 +263,16 @@ class Loader {
             parentTargets: Array.from(this.currentLoadSet),
             entryTarget: this.entryTarget,
             extra: this.extra,
-            refs: this.refs
+            refs: this.calcRefs()
         };
 
         this.bundleSettings = null;
         this.currentLoadSet.clear();
         this.entryTarget = null;
         this.extra = [];
-        this.refs = [];
+        this.externalImports = [];
+        this.refs.clear();
+        this.refpos = 0;
 
         return info;
     }
@@ -280,6 +285,23 @@ class Loader {
         });
 
         return Array.from(targets);
+    }
+
+    calcRefs() {
+        const refs = [];
+
+        for (let i = 0;i < this.refpos;++i) {
+            this.refs.get(i).forEach((ref) => refs.push(ref));
+        }
+
+        this.externalImports.forEach((i) => {
+            const add = this.refs.get(i);
+            if (add) {
+                add.forEach((ref) => refs.push(ref));
+            }
+        });
+
+        return refs;
     }
 
     lookupTarget(id) {
@@ -337,11 +359,10 @@ class Loader {
             let root = xpath.relative(this.context.tree.getPath(),data.root);
             root = root.replace(/\\/g,"/");
 
-            let n = 0;
+            const refs = [];
             bundles.refs.forEach((file) => {
                 if (typeof file === "string") {
-                    this.refs.unshift(xpath.join(root,file));
-                    n += 1;
+                    refs.push(xpath.join(root,file));
                 }
                 else if (typeof file === "object" && file.local) {
                     let ref;
@@ -353,27 +374,34 @@ class Loader {
                     }
 
                     if (typeof ref === "string") {
-                        this.refs.unshift(ref);
-                        n += 1;
+                        refs.push(ref);
                     }
                 }
             });
 
             // If a global was provided, rewrite this module.
-            if (n > 0 && bundles.global && typeof bundles.global === "string") {
+            if (refs.length > 0 && bundles.global && typeof bundles.global === "string") {
                 const bundleId = BUNDLE_PREFIX + id;
+                this.refs.set(bundleId,refs);
                 this.bundleSettings.output.globals[bundleId] = bundles.global;
 
-                let code = format("export { default } from \"%s\";\n",bundleId);
+                let code = "";
+                if (bundles.imports && Array.isArray(bundles.imports)) {
+                    code += bundles.imports.map((i) => format("import '%s';",i)).join("\n");
+                }
+
+                code += format("export { default } from \"%s\";\n",bundleId);
                 if (bundles.exports && Array.isArray(bundles.exports)) {
                     const inner = bundles.exports.join(", ");
                     code += format("export { %s } from \"%s\";\n",inner,bundleId);
                 }
 
+
                 return code;
             }
 
-            if (n > 0) {
+            if (refs.length > 0) {
+                this.refs.set(this.refpos++,refs);
                 return "";
             }
         }
