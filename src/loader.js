@@ -93,12 +93,15 @@ function makePlugin(loader,options) {
             }
 
             let importer = _importer;
+            const islocal = ( source[0] == "." || source[0] == "/" );
+
+            loader.toggleResolveOptions(islocal);
 
             if (importer) {
                 if (importer.startsWith(PREFIX)) {
                     importer = "/" + importer.slice(PREFIX.length);
                 }
-                else if (source[0] == "." && source[0] == "/") {
+                else if (islocal) {
                     // Cannot import webdeploy module from non-webdeploy module.
                     return null;
                 }
@@ -112,7 +115,7 @@ function makePlugin(loader,options) {
             // If there was no importer, then we failed to resolve the main
             // module and need to abort.
             if (!importer) {
-                if ((source[0] != "." && source[0] != "/")) {
+                if (!islocal) {
                     throw new PluginError("Entry point '%s' is not a webdeploy target",source);
                 }
 
@@ -134,6 +137,7 @@ class Loader {
 
         if (this.settings.nodeModules) {
             this.nodeResolve = this.makeNodeModulesPlugin();
+            this.resolveOptions = {};
         }
 
         // Local execution properties:
@@ -528,6 +532,19 @@ class Loader {
         return id;
     }
 
+    toggleResolveOptions(islocal) {
+        if (!this.resolveOptions) {
+            return;
+        }
+
+        if (islocal) {
+            this.resolveOptions.basedir = this.context.nodeModules;
+        }
+        else {
+            delete this.resolveOptions.basedir;
+        }
+    }
+
     makeNodeModulesPlugin() {
         const plugin = require("@rollup/plugin-node-resolve").default;
         const opts = Object.assign({},this.settings.nodeModules.options);
@@ -540,10 +557,7 @@ class Loader {
 
         // Assign custom resolve options. We do not allow the user to manipulate
         // these.
-        opts.customResolveOptions = {
-            basedir: this.context.tree.getPath(),
-            moduleDirectory: this.context.nodeModules
-        };
+        opts.customResolveOptions = this.resolveOptions;
 
         return plugin(opts);
     }
