@@ -55,6 +55,7 @@ function strip_plugin(plugin,hooks) {
 // refuse to touch a file if its name has a null byte.
 const PREFIX = "webdeploy:";
 const BUNDLE_PREFIX = "\0bundle:";
+const BUNDLE_EXTERN_PREFIX = "\0extern-bundle:";
 
 class LoaderAbortException extends Error {
 
@@ -65,49 +66,51 @@ function makePlugin(loader,options) {
         name: 'webdeploy-core',
 
         load(id) {
-            if (id.match(/\0/)) {
-                return null;
-            }
-
             if (id.startsWith(PREFIX)) {
                 const moduleId = id.slice(PREFIX.length);
 
                 return loader.load(moduleId);
             }
 
-            // Do bundles extension for non-webdeploy import.
+            if (id.startsWith(BUNDLE_PREFIX)) {
+                const moduleId = id.slice(BUNDLE_PREFIX.length);
 
-            if (!loader.settings.disableBundlesExtension) {
-                return loader.loadViaBundlesExtension(id);
+                return loader.loadBundle(moduleId);
             }
 
             return null;
         },
 
         async resolveId(source,_importer) {
-            if (source.startsWith(BUNDLE_PREFIX)) {
+            // Resolve external bundle modules.
+            if (source.startsWith(BUNDLE_EXTERN_PREFIX)) {
                 return {
                     id: source,
                     external: true
                 };
             }
 
+            let resolv;
             let importer = _importer;
             const islocal = ( source[0] == "." || source[0] == "/" );
 
-            loader.toggleResolveOptions(islocal);
-
+            let isImporterLocal;
             if (importer) {
-                if (importer.startsWith(PREFIX)) {
+                isImporterLocal = importer.startsWith(PREFIX);
+                if (isImporterLocal) {
                     importer = "/" + importer.slice(PREFIX.length);
-                }
-                else if (islocal) {
-                    // Cannot import webdeploy module from non-webdeploy module.
-                    return null;
                 }
             }
 
-            const resolv = await loader.resolveId(source,importer);
+            // Cannot import webdeploy module from non-webdeploy module.
+            if (islocal && isImporterLocal === false) {
+                return null;
+            }
+
+            // Try resolving a local source. We try this even for explicitly
+            // non-local sources in case an alias maps to a local file.
+
+            resolv = await loader.resolveId(source,importer);
             if (resolv) {
                 return PREFIX + resolv;
             }
@@ -120,6 +123,19 @@ function makePlugin(loader,options) {
                 }
 
                 throw new LoaderAbortException();
+            }
+
+            // Try resolving a non-local source.
+            if (!islocal) {
+                resolv = await loader.resolveId_NonLocal(
+                    source,
+                    importer,
+                    isImporterLocal
+                );
+
+                if (resolv) {
+                    return resolv;
+                }
             }
 
             return null;
@@ -137,7 +153,6 @@ class Loader {
 
         if (this.settings.nodeModules) {
             this.nodeResolve = this.makeNodeModulesPlugin();
-            this.resolveOptions = {};
         }
 
         // Local execution properties:
@@ -145,9 +160,7 @@ class Loader {
         this.currentLoadSet = new Set();
         this.entryTarget = null;
         this.extra = [];
-        this.externalImports = [];
-        this.refs = new Map(); // moduleId:string -> ref:string[]
-        this.refpos = 0;
+        this.bundles = new Map(); // id -> bundleInfo
     }
 
     makeInputOptions(bundleSettings) {
@@ -156,10 +169,6 @@ class Loader {
         // Manipulate plugins.
 
         let plugins = [this.corePlugin]; // first
-
-        if (this.nodeResolve) {
-            plugins.push(this.nodeResolve);
-        }
 
         const bundlePlugins = bundleSettings.loadPlugins();
         for (let i = 0;i < bundlePlugins.length;++i) {
@@ -257,7 +266,6 @@ class Loader {
         }
 
         const results = await bundle.generate(this.bundleSettings.output);
-        results.output.forEach((chunk) => chunk.imports.forEach((i) => this.externalImports.push(i)));
 
         return results.output;
     }
@@ -274,9 +282,7 @@ class Loader {
         this.currentLoadSet.clear();
         this.entryTarget = null;
         this.extra = [];
-        this.externalImports = [];
-        this.refs.clear();
-        this.refpos = 0;
+        this.bundles.clear();
 
         return info;
     }
@@ -292,17 +298,28 @@ class Loader {
     }
 
     calcRefs() {
+        const local = this.context.isDevDeployment();
         const refs = [];
 
-        for (let i = 0;i < this.refpos;++i) {
-            this.refs.get(i).forEach((ref) => refs.push(ref));
-        }
+        this.bundles.forEach((bundleInfo,id) => {
+            bundleInfo.refs.forEach((file) => {
+                if (typeof file === "string") {
+                    refs.push(xpath.join(bundleInfo.root,file));
+                }
+                else if (typeof file === "object" && file.local) {
+                    let ref;
+                    if (local || !file.remote) {
+                        ref = xpath.join(bundleInfo.root,file.local);
+                    }
+                    else {
+                        ref = file.remote;
+                    }
 
-        this.externalImports.forEach((i) => {
-            const add = this.refs.get(i);
-            if (add) {
-                add.forEach((ref) => refs.push(ref));
-            }
+                    if (typeof ref === "string") {
+                        refs.push(ref);
+                    }
+                }
+            });
         });
 
         return refs;
@@ -340,77 +357,35 @@ class Loader {
         return target.getContent();
     }
 
-    loadViaBundlesExtension(id) {
-        // Use the node-resolve plugin to get package.json contents.
-        const data = this.nodeResolve.getPackageInfoForId(id);
-        if (!data) {
+    loadBundle(id) {
+        const bundleInfo = this.bundles.get(id);
+        if (!bundleInfo || bundleInfo.refs.length == 0) {
             return null;
         }
 
-        const { packageJson } = data;
+        // If a global was provided, load a virtual module that provides
+        // exports.
+        if (bundleInfo.global && typeof bundleInfo.global === "string") {
+            const bundleId = BUNDLE_EXTERN_PREFIX + id;
+            this.bundleSettings.output.globals[bundleId] = bundleInfo.global;
 
-        // Use non-standard 'bundles' (or 'bundle') property to pull
-        // information.
-        const bundles = packageJson.bundles || packageJson.bundle;
-        if (!bundles || typeof bundles !== "object" || Array.isArray(bundles)) {
-            return;
-        }
-
-        // Pull bundle refs and globals.
-        if (bundles.refs && Array.isArray(bundles.refs)) {
-            const local = this.context.isDevDeployment();
-
-            let root = xpath.relative(this.context.tree.getPath(),data.root);
-            root = root.replace(/\\/g,"/");
-
-            const refs = [];
-            bundles.refs.forEach((file) => {
-                if (typeof file === "string") {
-                    refs.push(xpath.join(root,file));
-                }
-                else if (typeof file === "object" && file.local) {
-                    let ref;
-                    if (local || !file.remote) {
-                        ref = xpath.join(root,file.local);
-                    }
-                    else {
-                        ref = file.remote;
-                    }
-
-                    if (typeof ref === "string") {
-                        refs.push(ref);
-                    }
-                }
-            });
-
-            // If a global was provided, rewrite this module.
-            if (refs.length > 0 && bundles.global && typeof bundles.global === "string") {
-                const bundleId = BUNDLE_PREFIX + id;
-                this.refs.set(bundleId,refs);
-                this.bundleSettings.output.globals[bundleId] = bundles.global;
-
-                let code = "";
-                if (bundles.imports && Array.isArray(bundles.imports)) {
-                    code += bundles.imports.map((i) => format("import '%s';",i)).join("\n");
-                }
-
-                code += format("export { default } from \"%s\";\n",bundleId);
-                if (bundles.exports && Array.isArray(bundles.exports)) {
-                    const inner = bundles.exports.join(", ");
-                    code += format("export { %s } from \"%s\";\n",inner,bundleId);
-                }
-
-
-                return code;
+            let code = "";
+            if (bundleInfo.imports && Array.isArray(bundleInfo.imports)) {
+                code += bundleInfo.imports.map((i) => format("import '%s';",i)).join("\n");
             }
 
-            if (refs.length > 0) {
-                this.refs.set(this.refpos++,refs);
-                return "";
+            code += format("export { default } from \"%s\";\n",bundleId);
+            if (bundleInfo.exports && Array.isArray(bundleInfo.exports)) {
+                const inner = bundleInfo.exports.join(", ");
+                code += format("export { %s } from \"%s\";\n",inner,bundleId);
             }
+
+            return code;
         }
 
-        return null;
+        // If no global was provided, then the bundle is a pure source import
+        // resulting in no transformation.
+        return "";
     }
 
     async resolveId(source,importer) {
@@ -507,6 +482,71 @@ class Loader {
         return { id: null, candidates };
     }
 
+    async resolveId_NonLocal(id,importer,isImporterLocal) {
+        let resolved;
+
+        // Proxy to node-resolve plugin for a non-local resolve. The plugin is
+        // not called by rollup in the usual way.
+
+        if (isImporterLocal) {
+            // NOTE: Pass 'null' as the importer to trigger using the 'rootDir'
+            // as the base directory.
+            resolved = await this.nodeResolve.resolveId(id,null);
+        }
+        else {
+            resolved = await this.nodeResolve.resolveId(id,importer);
+        }
+
+        if (!resolved) {
+            return null;
+        }
+
+        if (!this.settings.disableBundlesExtension) {
+            let id = resolved;
+            if (typeof id === "object") {
+                ({ id } = id);
+            }
+            id = this.resolveBundles(id);
+
+            if (id) {
+                resolved = id;
+            }
+        }
+
+        return resolved;
+    }
+
+    resolveBundles(id) {
+        // Use the node-resolve plugin to get package.json contents.
+        const data = this.nodeResolve.getPackageInfoForId(id);
+        if (!data) {
+            return null;
+        }
+
+        const { packageJson } = data;
+
+        // Use non-standard 'bundles' (or 'bundle') property to pull
+        // information.
+        const bundleInfo = packageJson.bundles || packageJson.bundle;
+        if (!bundleInfo || typeof bundleInfo !== "object" || Array.isArray(bundleInfo)) {
+            return null;
+        }
+
+        // If the bundle is valid (i.e. contains refs), then we add it to the
+        // ordered map of bundles. This preserves the import order.
+        if (bundleInfo.refs && Array.isArray(bundleInfo.refs)) {
+            // Remember root directory relative to project tree for later.
+            let root = xpath.relative(this.context.tree.getPath(),data.root);
+            bundleInfo.root = root.replace(/\\/g,"/");
+
+            this.bundles.set(id,bundleInfo);
+
+            return BUNDLE_PREFIX + id;
+        }
+
+        return null;
+    }
+
     resolveAlias(id) {
         const parts = id.split(xpath.sep).filter((x) => !!x);
 
@@ -532,19 +572,6 @@ class Loader {
         return id;
     }
 
-    toggleResolveOptions(islocal) {
-        if (!this.resolveOptions) {
-            return;
-        }
-
-        if (islocal) {
-            this.resolveOptions.basedir = this.context.nodeModules;
-        }
-        else {
-            delete this.resolveOptions.basedir;
-        }
-    }
-
     makeNodeModulesPlugin() {
         const plugin = require("@rollup/plugin-node-resolve").default;
         const opts = Object.assign({},this.settings.nodeModules.options);
@@ -555,9 +582,9 @@ class Loader {
             );
         }
 
-        // Assign custom resolve options. We do not allow the user to manipulate
-        // these.
-        opts.customResolveOptions = this.resolveOptions;
+        // Assign root directory so that all local node_modules import resolve
+        // under the node_modules directory used for the webdeploy project.
+        opts.rootDir = this.context.nodeModules;
 
         return plugin(opts);
     }
