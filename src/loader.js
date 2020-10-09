@@ -498,6 +498,10 @@ class Loader {
         }
 
         if (!resolved) {
+            if (id[0] == "~") {
+                return xpath.join(this.context.nodeModules,id.slice(1));
+            }
+
             return null;
         }
 
