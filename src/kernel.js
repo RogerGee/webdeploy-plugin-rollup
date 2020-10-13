@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const utils = require("./utils");
-const { format } = require("util");
+const { format, promisify } = require("util");
 const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
 const { Loader, LoaderAbortException } = require("./loader");
@@ -64,6 +64,11 @@ class Kernel {
         // selected by the configuration, we must purge them from the dependency
         // tree.
         this.context.removeTargets(this.loader.calcExtraneous(),true);
+
+        let assetRefs = this.loadAssets();
+        if (assetRefs) {
+            groups.push(assetRefs);
+        }
 
         await this.executeBuilder(targets);
         await this.finalize(groups);
@@ -139,6 +144,45 @@ class Kernel {
                 targets[i].file = resolv;
             }
         }
+    }
+
+    loadAssets() {
+        if (!this.settings.assets) {
+            return null;
+        }
+
+        let refs = [];
+
+        this.context.logger.log("Loading external assets:");
+        this.context.logger.pushIndent();
+
+        for (let i = 0;i < this.settings.assets.length;++i) {
+            let stream;
+            const entry = this.settings.assets[i];
+
+            try {
+                const assetPath = path.join(this.context.nodeModules,entry[0]);
+                stream = fs.createReadStream(assetPath);
+            } catch (ex) {
+                if (ex.code == "ENOENT") {
+                    throw new PluginError("asset '%s' was not found under node_modules",entry[0]);
+                }
+
+                throw ex;
+            }
+
+            const target = this.context.createTarget(entry[1]);
+            target.stream = stream;
+
+            let ref = target.getSourceTargetPath();
+            refs.push(ref);
+
+            this.context.logger.log("Add asset _" + ref + "_");
+        }
+
+        this.context.logger.popIndent();
+
+        return refs;
     }
 
     async finalize(groups) {
