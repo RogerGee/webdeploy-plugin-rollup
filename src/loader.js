@@ -139,6 +139,19 @@ function makePlugin(loader,options) {
             }
 
             return null;
+        },
+
+        renderChunk(code,chunk,options) {
+            // Use external module import order to denote bundle order.
+            for (let i = 0;i < chunk.imports.length;++i) {
+                const id = chunk.imports[i];
+
+                if (id.startsWith(BUNDLE_EXTERN_PREFIX)) {
+                    loader.bundleOrder.push(id.slice(BUNDLE_EXTERN_PREFIX.length));
+                }
+            }
+
+            return null;
         }
     };
 }
@@ -160,6 +173,7 @@ class Loader {
         this.currentLoadSet = new Set();
         this.entryTarget = null;
         this.extra = [];
+        this.bundleOrder = [];
         this.bundles = new Map(); // id -> bundleInfo
     }
 
@@ -168,7 +182,7 @@ class Loader {
 
         // Manipulate plugins.
 
-        let plugins = [this.corePlugin]; // first
+        let plugins = [strip_plugin(this.corePlugin,INPUT_HOOKS)]; // first
 
         const bundlePlugins = bundleSettings.loadPlugins();
         for (let i = 0;i < bundlePlugins.length;++i) {
@@ -206,7 +220,7 @@ class Loader {
             options.globals = {};
         }
 
-        let plugins = [];
+        let plugins = [strip_plugin(this.corePlugin,OUTPUT_HOOKS)]; // first
 
         const bundlePlugins = bundleSettings.loadPlugins();
         for (let i = 0;i < bundlePlugins.length;++i) {
@@ -282,6 +296,7 @@ class Loader {
         this.currentLoadSet.clear();
         this.entryTarget = null;
         this.extra = [];
+        this.bundleOrder = [];
         this.bundles.clear();
 
         return info;
@@ -301,7 +316,12 @@ class Loader {
         const local = this.context.isDevDeployment();
         const refs = [];
 
-        this.bundles.forEach((bundleInfo,id) => {
+        for (let i = 0;i < this.bundleOrder.length;++i) {
+            const bundleInfo = this.bundles.get(this.bundleOrder[i]);
+            if (!bundleInfo) {
+                continue;
+            }
+
             bundleInfo.refs.forEach((file) => {
                 if (typeof file === "string") {
                     refs.push(xpath.join(bundleInfo.root,file));
@@ -320,7 +340,7 @@ class Loader {
                     }
                 }
             });
-        });
+        }
 
         return refs;
     }
@@ -363,10 +383,12 @@ class Loader {
             return null;
         }
 
-        // If a global was provided, load a virtual module that provides
-        // exports.
+        // Make external bundle module ID.
+        const bundleId = BUNDLE_EXTERN_PREFIX + id;
+
+        // If a global was provided, load a virtual module that provides imports
+        // and/or exports.
         if (bundleInfo.global && typeof bundleInfo.global === "string") {
-            const bundleId = BUNDLE_EXTERN_PREFIX + id;
             this.bundleSettings.output.globals[bundleId] = bundleInfo.global;
 
             let code = "";
@@ -384,8 +406,8 @@ class Loader {
         }
 
         // If no global was provided, then the bundle is a pure source import
-        // resulting in no transformation.
-        return "";
+        // that imports the virtual module.
+        return format("import '%s';\n",bundleId);
     }
 
     async resolveId(source,importer) {
