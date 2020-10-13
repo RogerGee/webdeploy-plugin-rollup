@@ -82,7 +82,7 @@ function check_array(context,settings,name,...types) {
         );
     }
 
-    return check_array_impl(context,val,...types);
+    return check_array_impl(format_context(context,key),val,...types);
 }
 
 function check_array_ensure(context,settings,name,...types) {

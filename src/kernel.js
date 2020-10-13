@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const utils = require("./utils");
-const { format, promisify } = require("util");
+const { format } = require("util");
 const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
 const { Loader, LoaderAbortException } = require("./loader");
@@ -15,9 +15,10 @@ const { Loader, LoaderAbortException } = require("./loader");
 class Kernel {
     static resolveGroups(groups) {
         groups.forEach((group) => {
-            for (let i = 0;i < group.length;++i) {
-                if (typeof group[i] === "object") {
-                    group[i] = group[i].file;
+            for (let i = 0;i < group.refs.length;++i) {
+                const ref = group.refs[i];
+                if (typeof ref === "object") {
+                    group.refs[i] = ref.file;
                 }
             }
         });
@@ -47,13 +48,13 @@ class Kernel {
         let groups = [];
         let targets = [];
         for (let i = 0;i < this.settings.bundles.length;++i) {
-            const group = [];
+            const group = { key:format("bundle-%d",i), refs:[] };
             const result = await this.compileBundle(this.settings.bundles[i]);
-            result.refs.forEach((ref) => group.push(ref));
+            result.refs.forEach((ref) => group.refs.push(ref));
             result.targets.forEach((target) => {
                 const entry = { target, file: target.getSourceTargetPath() };
                 targets.push(entry);
-                group.push(entry);
+                group.refs.push(entry);
             });
             groups.push(group);
         }
@@ -65,10 +66,7 @@ class Kernel {
         // tree.
         this.context.removeTargets(this.loader.calcExtraneous(),true);
 
-        let assetRefs = this.loadAssets();
-        if (assetRefs) {
-            groups.push(assetRefs);
-        }
+        this.loadAssets(groups);
 
         await this.executeBuilder(targets);
         await this.finalize(groups);
@@ -146,12 +144,12 @@ class Kernel {
         }
     }
 
-    loadAssets() {
+    loadAssets(groups) {
         if (!this.settings.assets) {
             return null;
         }
 
-        let refs = [];
+        let group = { key:"assets", refs:[] };
 
         this.context.logger.log("Loading external assets:");
         this.context.logger.pushIndent();
@@ -175,14 +173,14 @@ class Kernel {
             target.stream = stream;
 
             let ref = target.getSourceTargetPath();
-            refs.push(ref);
+            group.refs.push(ref);
 
             this.context.logger.log("Add asset _" + ref + "_");
         }
 
         this.context.logger.popIndent();
 
-        return refs;
+        groups.push(group);
     }
 
     async finalize(groups) {
