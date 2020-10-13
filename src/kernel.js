@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const utils = require("./utils");
-const { format } = require("util");
+const { format, promisify } = require("util");
 const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
 const { Loader, LoaderAbortException } = require("./loader");
@@ -66,8 +66,7 @@ class Kernel {
         // tree.
         this.context.removeTargets(this.loader.calcExtraneous(),true);
 
-        this.loadAssets(groups);
-
+        await this.loadAssets(groups);
         await this.executeBuilder(targets);
         await this.finalize(groups);
     }
@@ -144,9 +143,33 @@ class Kernel {
         }
     }
 
-    loadAssets(groups) {
-        if (!this.settings.assets) {
-            return null;
+    async loadAssets(groups) {
+        if (!this.settings.assets || this.settings.assets.length == 0) {
+            return;
+        }
+
+        // Only process the assets that haven't already been deployed.
+        let assets = [];
+        const stat = promisify(fs.stat);
+        for (let i = 0;i < this.settings.assets.length;++i) {
+            const entry = this.settings.assets[i];
+            const deployPath = this.context.makeDeployPath(entry[1]);
+
+            try {
+                await stat(deployPath);
+
+            } catch (ex) {
+                if (ex.code == "ENOENT") {
+                    assets.push(entry);
+                }
+                else {
+                    throw ex;
+                }
+            }
+        }
+
+        if (assets.length == 0) {
+            return;
         }
 
         let group = { key:"assets", refs:[] };
@@ -154,9 +177,9 @@ class Kernel {
         this.context.logger.log("Loading external assets:");
         this.context.logger.pushIndent();
 
-        for (let i = 0;i < this.settings.assets.length;++i) {
+        for (let i = 0;i < assets.length;++i) {
             let stream;
-            const entry = this.settings.assets[i];
+            const entry = assets[i];
 
             try {
                 const assetPath = path.join(this.context.nodeModules,entry[0]);
