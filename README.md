@@ -26,14 +26,39 @@ If you are using `babel`, then you should also install `@babel/core@^7.0.0`.
 
 If you define a `manifest` section in your config, you should also install [`@webdeploy/plugin-manfest`](https://www.npmjs.com/package/@webdeploy/plugin-manifest).
 
+## General Usage
+
+When importing modules in JavaScript that refer to `webdeploy` targets, the module source path must begin with path characteristics (either relative or absolute):
+
+~~~javascript
+// 'module' is a webdeploy target
+import './module'; // relative
+import '/module'; // absolute
+
+// 'module' lives under node_modules package
+import 'module'; // node_modules
+~~~
+
+To import a file directly under `node_modules`, prefix the source path with `~`. You _cannot_ load files under `node_modules` directly using the `node_modules` path; you must use the `~` syntax.
+
+~~~javascript
+// include 'node_modules/package/dist/styles.css'
+import '~package/dist/styles.css';
+
+// this does NOT work
+import 'node_modules/package/dist/styles.css';
+~~~
+
 ## Config
 
-There are three core config sections:
+Core config sections:
 
  - `loader` (required)
  - `bundles` (required)
  - `build` (optional)
  - `manifest` (optional)
+ - `assets` (optional)
+ - `write` (optional, settings forwarded to core `write` plugin)
 
 ## Config: `loader`
 
@@ -193,6 +218,26 @@ This is an array of build handlers having the same format as core `webdeploy` `i
 If you need to generate a manifest, then you can provide a `manifest` section. When a `manifest` is enabled, the plugin will chain to [`@webdeploy/plugin-manfest`](https://www.npmjs.com/package/@webdeploy/plugin-manifest) instead of just writing out the files. References to bundles (either generated or referenced via the Bundles Extension) are forwarded to the manifest extension.
 
 This config object is passed to the `manifest` plugin. Every property is respected except `refs` which are set by the rollup plugin.
+
+## Config: `assets`
+
+- Type: `Array`
+- Default: `null`
+
+Enables asset injection into the deployment. This capability loads external files under `node_modules` as `webdeploy` targets that will be written out in the destination. This is an alternative to importing sources in JavaScript, designed to work for static assets copied from Node packages.
+
+The property is an array of source imports to inject. Each element implies a path under `node_modules` (i.e. as if the path was prefixed with `~`). By default, the path is preserved when written out to the destination. To rename an import, a 2-tuple array may be passed where the first element is the source path and the second element is the destination path.
+
+Example:
+
+~~~js
+[
+  // Install asset from package 'assets'
+  "assets/ico/favicon.png",
+  // Install asset from package 'widget'
+  ["widget/fonts/alpha.ttf","dist/fonts/alpha.ttf"]
+]
+~~~
 
 ## Example Config
 
