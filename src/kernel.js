@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const utils = require("./utils");
-const { format } = require("util");
+const { format, promisify } = require("util");
 const { PluginError } = require("./error");
 const { PluginSettings } = require("./settings");
 const { Loader, LoaderAbortException } = require("./loader");
@@ -15,9 +15,10 @@ const { Loader, LoaderAbortException } = require("./loader");
 class Kernel {
     static resolveGroups(groups) {
         groups.forEach((group) => {
-            for (let i = 0;i < group.length;++i) {
-                if (typeof group[i] === "object") {
-                    group[i] = group[i].file;
+            for (let i = 0;i < group.refs.length;++i) {
+                const ref = group.refs[i];
+                if (typeof ref === "object") {
+                    group.refs[i] = ref.file;
                 }
             }
         });
@@ -47,15 +48,17 @@ class Kernel {
         let groups = [];
         let targets = [];
         for (let i = 0;i < this.settings.bundles.length;++i) {
-            const group = [];
+            const group = { key:format("bundle-%d",i), refs:[] };
             const result = await this.compileBundle(this.settings.bundles[i]);
-            result.refs.forEach((ref) => group.push(ref));
+            result.refs.forEach((ref) => group.refs.push(ref));
             result.targets.forEach((target) => {
                 const entry = { target, file: target.getSourceTargetPath() };
                 targets.push(entry);
-                group.push(entry);
+                group.refs.push(entry);
             });
-            groups.push(group);
+            if (group.refs.length > 0) {
+                groups.push(group);
+            }
         }
 
         this.context.logger.popIndent();
@@ -65,6 +68,7 @@ class Kernel {
         // tree.
         this.context.removeTargets(this.loader.calcExtraneous(),true);
 
+        await this.loadAssets(groups);
         await this.executeBuilder(targets);
         await this.finalize(groups);
     }
@@ -139,6 +143,69 @@ class Kernel {
                 targets[i].file = resolv;
             }
         }
+    }
+
+    async loadAssets(groups) {
+        if (!this.settings.assets || this.settings.assets.length == 0) {
+            return;
+        }
+
+        // Only process the assets that haven't already been deployed.
+        let assets = [];
+        const stat = promisify(fs.stat);
+        for (let i = 0;i < this.settings.assets.length;++i) {
+            const entry = this.settings.assets[i];
+            const deployPath = this.context.makeDeployPath(entry[1]);
+
+            try {
+                await stat(deployPath);
+
+            } catch (ex) {
+                if (ex.code == "ENOENT") {
+                    assets.push(entry);
+                }
+                else {
+                    throw ex;
+                }
+            }
+        }
+
+        if (assets.length == 0) {
+            return;
+        }
+
+        let group = { key:"assets", refs:[] };
+
+        this.context.logger.log("Loading external assets:");
+        this.context.logger.pushIndent();
+
+        for (let i = 0;i < assets.length;++i) {
+            let stream;
+            const entry = assets[i];
+
+            try {
+                const assetPath = path.join(this.context.nodeModules,entry[0]);
+                stream = fs.createReadStream(assetPath);
+            } catch (ex) {
+                if (ex.code == "ENOENT") {
+                    throw new PluginError("asset '%s' was not found under node_modules",entry[0]);
+                }
+
+                throw ex;
+            }
+
+            const target = this.context.createTarget(entry[1]);
+            target.stream = stream;
+
+            let ref = target.getSourceTargetPath();
+            group.refs.push(ref);
+
+            this.context.logger.log("Add asset _" + ref + "_");
+        }
+
+        this.context.logger.popIndent();
+
+        groups.push(group);
     }
 
     async finalize(groups) {

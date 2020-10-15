@@ -82,7 +82,7 @@ function check_array(context,settings,name,...types) {
         );
     }
 
-    return check_array_impl(context,val,...types);
+    return check_array_impl(format_context(context,key),val,...types);
 }
 
 function check_array_ensure(context,settings,name,...types) {
@@ -399,7 +399,33 @@ class PluginSettings {
 
         this.build = check_optional(check_array,"settings",settings,"build",[],"object","string");
         this.manifest = check_optional(check,"settings",settings,"manifest",null,"object");
+        this.assets = check_optional(check_array,"settings",settings,"assets",null,"array","string");
         this.write = check_optional(check,"settings",settings,"write",{},"object");
+
+        this._checkAssets();
+    }
+
+    _checkAssets() {
+        if (!this.assets) {
+            return;
+        }
+
+        for (let i = 0;i < this.assets.length;++i) {
+            const context = format_context("settings.assets",i);
+            const elem = this.assets[i];
+            if (Array.isArray(elem)) {
+                if (elem.length != 2) {
+                    throw new PluginError("'%s' must be a 2-tuple array",context);
+                }
+                check_array("settings.assets",this.assets,i,"string");
+            }
+            else if (typeof elem !== "string") {
+                throw new PluginError("'%s' must be a string",context);
+            }
+            else {
+                this.assets[i] = [elem,elem];
+            }
+        }
     }
 }
 
