@@ -130,7 +130,7 @@ function makePlugin(loader,options) {
                 resolv = await loader.resolveId_NonLocal(
                     source,
                     importer,
-                    isImporterLocal
+                    isImporterLocal || importer.startsWith(BUNDLE_PREFIX)
                 );
 
                 if (resolv) {
