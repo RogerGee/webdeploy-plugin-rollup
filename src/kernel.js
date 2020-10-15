@@ -56,7 +56,9 @@ class Kernel {
                 targets.push(entry);
                 group.refs.push(entry);
             });
-            groups.push(group);
+            if (group.refs.length > 0) {
+                groups.push(group);
+            }
         }
 
         this.context.logger.popIndent();
